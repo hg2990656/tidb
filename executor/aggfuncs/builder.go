@@ -51,6 +51,8 @@ func Build(ctx sessionctx.Context, aggFuncDesc *aggregation.AggFuncDesc, ordinal
 		return buildBitXor(aggFuncDesc, ordinal)
 	case ast.AggFuncBitAnd:
 		return buildBitAnd(aggFuncDesc, ordinal)
+	case ast.AggFuncJsonObjectAgg:
+		return buildJsonObjectAgg(aggFuncDesc, ordinal)
 	}
 	return nil
 }
@@ -341,6 +343,23 @@ func buildBitAnd(aggFuncDesc *aggregation.AggFuncDesc, ordinal int) AggFunc {
 		ordinal: ordinal,
 	}
 	return &bitAndUint64{baseBitAggFunc{base}}
+}
+
+// buildJsonObjectAgg builds the AggFunc implementation for function "json_objectagg".
+func buildJsonObjectAgg(aggFuncDesc *aggregation.AggFuncDesc, ordinal int) AggFunc {
+	base := baseAggFunc{
+		args:    aggFuncDesc.Args,
+		ordinal: ordinal,
+	}
+	switch aggFuncDesc.Mode {
+	case aggregation.DedupMode:
+		return nil
+	case aggregation.CompleteMode, aggregation.Partial1Mode:
+		return &original4JsonObjectAgg{baseJsonObjectAgg{base}}
+	case aggregation.Partial2Mode, aggregation.FinalMode:
+		return &partial4JsonObjectAgg{baseJsonObjectAgg{base}}
+	}
+	return nil
 }
 
 // buildRowNumber builds the AggFunc implementation for function "ROW_NUMBER".
