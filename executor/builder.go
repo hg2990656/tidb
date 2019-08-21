@@ -869,6 +869,21 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 		}
 	}
 
+	// mei tuan
+	//e := &MergeJoinExec{
+	//	stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
+	//	baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
+	//	joiner: newJoiner(b.ctx, v.JoinType, v.JoinType == plannercore.RightOuterJoin,
+	//		defaultValues, v.OtherConditions,
+	//		leftExec.retTypes(), rightExec.retTypes()),
+	//}
+	//
+	//e.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftKeys))
+	//for i := range v.LeftKeys {
+	//	e.compareFuncs = append(e.compareFuncs, chunk.GetCompareFunc(v.LeftKeys[i].RetType))
+	//}
+
+	// parallel_merge_join exec
 	e := &MergeJoinExec{
 		stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
@@ -883,6 +898,7 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 			retTypes(rightExec),
 		),
 		isOuterJoin: v.JoinType.IsOuterJoin(),
+		//workerWg:      new(sync.WaitGroup),
 	}
 
 	leftKeys := v.LeftKeys
@@ -891,22 +907,32 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 	e.outerIdx = 0
 	innerFilter := v.RightConditions
 
-	e.innerTable = &mergeJoinInnerTable{
-		reader:   rightExec,
-		joinKeys: rightKeys,
-	}
+	//e.innerTable = &mergeJoinInnerTable{
+	//	reader:   rightExec,
+	//	joinKeys: rightKeys,
+	//}
+	//
+	//e.outerTable = &mergeJoinOuterTable{
+	//	reader: leftExec,
+	//	filter: v.LeftConditions,
+	//	keys:   leftKeys,
+	//}
 
-	e.outerTable = &mergeJoinOuterTable{
-		reader: leftExec,
-		filter: v.LeftConditions,
-		keys:   leftKeys,
-	}
+	e.innerTable = &mergeJoinInnerTable{}
+	e.innerTable.reader = rightExec
+	e.innerTable.joinKeys = rightKeys
+
+	e.outerTable = &mergeJoinOuterTable{}
+	e.outerTable.reader = leftExec
+	e.outerTable.filter = v.LeftConditions
+	e.outerTable.joinKeys = v.LeftKeys
 
 	if v.JoinType == plannercore.RightOuterJoin {
 		e.outerIdx = 1
 		e.outerTable.reader = rightExec
 		e.outerTable.filter = v.RightConditions
-		e.outerTable.keys = rightKeys
+		//e.outerTable.keys = rightKeys
+		e.outerTable.joinKeys = rightKeys
 
 		innerFilter = v.LeftConditions
 		e.innerTable.reader = leftExec
