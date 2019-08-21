@@ -878,16 +878,11 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 	//		retTypes(leftExec), retTypes(rightExec)),
 	//}
 
-	//e.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftKeys))
-	//for i := range v.LeftKeys {
-	//	e.compareFuncs = append(e.compareFuncs, chunk.GetCompareFunc(v.LeftKeys[i].RetType))
-	//}
-
 	// parallel_merge_join exec
 	e := &MergeJoinExec{
 		stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
-		compareFuncs: v.CompareFuncs,
+		//compareFuncs: v.CompareFuncs,
 		joiner: newJoiner(
 			b.ctx,
 			v.JoinType,
@@ -897,8 +892,13 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 			retTypes(leftExec),
 			retTypes(rightExec),
 		),
-		isOuterJoin: v.JoinType.IsOuterJoin(),
+		//isOuterJoin: v.JoinType.IsOuterJoin(),
 		//workerWg:      new(sync.WaitGroup),
+	}
+
+	e.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftKeys))
+	for i := range v.LeftKeys {
+		e.compareFuncs = append(e.compareFuncs, chunk.GetCompareFunc(v.LeftKeys[i].RetType))
 	}
 
 	leftKeys := v.LeftKeys

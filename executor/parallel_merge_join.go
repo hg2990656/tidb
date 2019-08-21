@@ -25,7 +25,7 @@ type MergeJoinExec struct {
 
 	workerWg     *sync.WaitGroup
 	stmtCtx      *stmtctx.StatementContext
-	compareFuncs []expression.CompareFunc
+	compareFuncs []chunk.CompareFunc
 	joiner       joiner // e.joiner.tryToMatch & e.joiner.onMissMatch
 	isOuterJoin  bool
 	outerIdx int
@@ -94,7 +94,7 @@ type mergeJoinWorker struct {
 	outerJoinKeys []*expression.Column
 	innerJoinKeys      []*expression.Column
 
-	compareFuncs []expression.CompareFunc
+	compareFuncs []chunk.CompareFunc
 
 }
 
