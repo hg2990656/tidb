@@ -30,7 +30,7 @@ type MergeJoinExec struct {
 	isOuterJoin  bool
 	outerIdx int
 
-	innerTable *mergeJoinInnerTable
+	innerTable mergeJoinInnerTable
 	outerTable *mergeJoinOuterTable
 
 	memTracker *memory.Tracker
@@ -89,7 +89,7 @@ type mergeJoinWorker struct {
 
 	innerCache []chunk.Row
 
-	innerTable *mergeJoinInnerTable
+	innerTable mergeJoinInnerTable
 
 	outerJoinKeys []*expression.Column
 	innerJoinKeys      []*expression.Column

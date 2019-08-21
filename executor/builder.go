@@ -918,7 +918,7 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 	//	keys:   leftKeys,
 	//}
 
-	e.innerTable = &mergeJoinInnerTable{}
+	e.innerTable = mergeJoinInnerTable{}
 	e.innerTable.reader = rightExec
 	e.innerTable.joinKeys = rightKeys
 
