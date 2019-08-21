@@ -875,9 +875,9 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 	//	baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
 	//	joiner: newJoiner(b.ctx, v.JoinType, v.JoinType == plannercore.RightOuterJoin,
 	//		defaultValues, v.OtherConditions,
-	//		leftExec.retTypes(), rightExec.retTypes()),
+	//		retTypes(leftExec), retTypes(rightExec)),
 	//}
-	//
+
 	//e.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftKeys))
 	//for i := range v.LeftKeys {
 	//	e.compareFuncs = append(e.compareFuncs, chunk.GetCompareFunc(v.LeftKeys[i].RetType))

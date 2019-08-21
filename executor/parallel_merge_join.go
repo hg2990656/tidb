@@ -136,10 +136,10 @@ type outerFetchWorker struct {
 	maxChunkSize       int
 }
 
-type innerFetchWorker struct {
-	innerTable    *mergeJoinInnerTable
-	innerResultCh chan<- *innerFetchResult
-}
+//type innerFetchWorker struct {
+//	innerTable    *mergeJoinInnerTable
+//	innerResultCh chan<- *innerFetchResult
+//}
 
 // Open implements the Executor Open interface.
 func (e *MergeJoinExec) Open(ctx context.Context) error {
@@ -159,7 +159,7 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	joinChkResourceChs := make([]chan *chunk.Chunk, concurrency)
 	for i := 0; i < concurrency; i++ {
 		joinChkResourceChs[i] = make(chan *chunk.Chunk, 1)
-		joinChkResourceChs[i] <- e.newFirstChunk()
+		joinChkResourceChs[i] <- newFirstChunk(e)
 	}
 	e.joinChkResourceChs = joinChkResourceChs
 
@@ -226,19 +226,10 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 		//wg.Done()
 	}()
 
-	//fetchResult := &outerFetchResult{}
-	err := ow.outerTable.init(ctx, ow.outerTable.reader.newFirstChunk())
+	err := ow.outerTable.init(ctx, newFirstChunk(ow.outerTable.reader))
 	if err != nil {
-		//fetchResult.err = err
-		//ow.outerFetchResultCh <- fetchResult
 		return
 	}
-
-	// ow.outerTable.init() has fetched the first chunk
-	//error := ow.fetchNextOuterChunk(ctx)
-	//if error != nil {
-	//	return
-	//}
 
 	waitGroup := new(sync.WaitGroup)
 	joinResultCh := make(chan *mergeJoinWorkerResult)
@@ -265,14 +256,6 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 
 		waitGroup.Add(1)
 
-		//if finished := ow.pushToChan(ctx, mt, ow.innerCh); finished {
-		//	return
-		//}
-		//
-		//if finished := ow.pushToChan(ctx, mt, ow.resultCh); finished {
-		//	return
-		//}
-
 		ow.innerCh <- mt
 		ow.resultCh <- mt
 	}
@@ -281,15 +264,6 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 		waitGroup.Wait()
 		close(joinResultCh)
 	}()
-}
-
-func (ow *outerFetchWorker) pushToChan(ctx context.Context, task *mergeTask, dst chan<- *mergeTask) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	case dst <- task:
-	}
-	return false
 }
 
 func (t *mergeJoinTable) rowsWithSameKey() ([]chunk.Row, error) {
@@ -334,10 +308,6 @@ func (t *mergeJoinTable) nextChunkRow() (chunk.Row, error) {
 		t.curRow = t.curIter.Next()
 
 		return result, nil
-
-		//if !t.hasNullInJoinKey(result) {
-		//	return result, nil
-		//}
 	}
 }
 
@@ -354,7 +324,8 @@ func (t *mergeJoinTable) hasNullInJoinKey(row chunk.Row) bool{
 func (ow *outerFetchWorker) fetchNextOuterChunk(ctx context.Context) (err error) {
 	ow.outerTable.reallocReaderResult()
 
-	err = ow.outerTable.reader.Next(ctx, chunk.NewRecordBatch(ow.outerTable.curResult))
+	//err = ow.outerTable.reader.Next(ctx, chunk.NewRecordBatch(ow.outerTable.curResult))
+	err = Next(ctx, ow.outerTable.reader, ow.outerTable.curResult)
 	if err != nil {
 		return err
 	}
@@ -415,17 +386,13 @@ func (jw *mergeJoinWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 		return
 	}
 
-	err := jw.innerTable.init(ctx, jw.innerTable.reader.newFirstChunk())
+	err := jw.innerTable.init(ctx, newFirstChunk(jw.innerTable.reader))
 	if err != nil {
 		return
 	}
 
 	rowsWithSameKey, err := jw.innerTable.rowsWithSameKey()
 
-	// fetch inner rows
-	//if !jw.fetchNextInnerRows(ctx) {
-	//	return
-	//}
 	var mt *mergeTask
 	var s int
 	// 1.get merge task from outerFetchWorker
@@ -451,19 +418,6 @@ func (jw *mergeJoinWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 
 		// 2.use for{} to get the sameKeyGroup rows from inner table chunk and compare with outer table rows in merge task
 		for {
-			//if jw.innerTable.curRow == jw.innerTable.curIter.End() {
-			//  //jw.innerCache = jw.innerTable.sameKeyRows
-			//	err := jw.fetchNextInnerChunk(ctx)
-			//	if err != nil || jw.innerTable.curResult.NumRows() == 0 {
-			//		return
-			//	}
-			//	trap = true
-			//}
-			// rowsWithSameKey, err := jw.getInnerSameKeyRows()
-			//rowsWithSameKey, err := jw.innerTable.rowsWithSameKey()
-			//if err != nil {
-			//	return
-			//}
 			cmpResult := -1
 
 			cmpResult = compareIOChunkRow(jw.innerTable.compareFuncs, mt.outerRows[0], rowsWithSameKey[0], jw.outerJoinKeys, jw.innerJoinKeys)
@@ -665,7 +619,8 @@ func compareIOChunkRow(cmpFuncs []chunk.CompareFunc, lhsRow, rhsRow chunk.Row, l
 
 func (jw *mergeJoinWorker) fetchNextInnerChunk(ctx context.Context) (err error) {
 	jw.innerTable.reallocReaderResult()
-	err = jw.innerTable.reader.Next(ctx, chunk.NewRecordBatch(jw.innerTable.curResult))
+	//err = jw.innerTable.reader.Next(ctx, chunk.NewRecordBatch(jw.innerTable.curResult))
+	err = Next(ctx, jw.innerTable.reader, jw.innerTable.curResult)
 	if err != nil {
 		return err
 	}
@@ -685,8 +640,9 @@ func (jw *mergeJoinWorker) getInnerSameKeyRows() ([]chunk.Row, error){
 	}
 	jw.innerTable.sameKeyRows = jw.innerTable.sameKeyRows[:0]
 	jw.innerTable.sameKeyRows = append(jw.innerTable.sameKeyRows, jw.innerTable.firstRow4Key)
+
+	flag := false
 	for {
-		flag := false
 		selectedRow, err := jw.innerTable.nextChunkRow()
 		// error happens or no more data.
 		if err != nil || flag {
@@ -761,7 +717,8 @@ func (t *mergeJoinTable) nextRow() (chunk.Row, error) {
 		if t.curRow == t.curIter.End() {
 			t.reallocReaderResult()
 			//oldMemUsage := t.curResult.MemoryUsage()
-			err := t.reader.Next(t.ctx, chunk.NewRecordBatch(t.curResult))
+			//err := t.reader.Next(t.ctx, chunk.NewRecordBatch(t.curResult))
+			err := Next(t.ctx, t.reader, t.curResult)
 			numRows := t.curResult.NumRows()
 			// error happens or no more data.
 			if err != nil || numRows == 0 {
@@ -783,7 +740,7 @@ func (t *mergeJoinTable) nextRow() (chunk.Row, error) {
 	}
 }
 
-func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.RecordBatch) error {
+func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Since(start), req.NumRows()) }()
@@ -804,7 +761,7 @@ func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.RecordBatch) error 
 		}
 
 		joinResult, ok := <-e.curTask.joinResultCh
-		//curTask process complete,we need getNextTask,so set curTask = nil
+		//curTask process complete, we need getNextTask, so set curTask = nil
 		if !ok {
 			e.curTask = nil
 			continue
@@ -843,7 +800,7 @@ func (t *mergeJoinTable) reallocReaderResult() {
 	}
 
 	// NOTE: "t.curResult" is always the last element of "resultQueue".
-	t.curResult = t.reader.newFirstChunk()
+	t.curResult = newFirstChunk(t.reader)
 	t.curIter = chunk.NewIterator4Chunk(t.curResult)
 	t.curResult.Reset()
 	t.curResultInUse = false

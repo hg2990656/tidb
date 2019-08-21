@@ -262,3 +262,40 @@ func VectorizedFilter(ctx sessionctx.Context, filters []Expression, iterator *ch
 	}
 	return selected, nil
 }
+
+// VectorizedFilter applies a list of filters to a rowSlice and
+// returns a bool slice, which indicates whether a row is passed the filters.
+// Filters is executed vectorized.
+func VectorizedFilterByRow(ctx sessionctx.Context, filters []Expression, rows []chunk.Row, selected []bool) ([]bool, error) {
+	selected = selected[:0]
+	for i, numRows := 0, len(rows); i < numRows; i++ {
+		selected = append(selected, true)
+	}
+	for _, filter := range filters {
+		isIntType := true
+		if filter.GetType().EvalType() != types.ETInt {
+			isIntType = false
+		}
+		for idx := 0; idx < len(rows); idx++ {
+			row := rows[idx]
+			if !selected[idx] {
+				continue
+			}
+			if isIntType {
+				filterResult, isNull, err := filter.EvalInt(ctx, row)
+				if err != nil {
+					return nil, err
+				}
+				selected[idx] = selected[idx] && !isNull && (filterResult != 0)
+			} else {
+				// TODO: should rewrite the filter to `cast(expr as SIGNED) != 0` and always use `EvalInt`.
+				bVal, _, err := EvalBool(ctx, []Expression{filter}, row)
+				if err != nil {
+					return nil, err
+				}
+				selected[idx] = selected[idx] && bVal
+			}
+		}
+	}
+	return selected, nil
+}
