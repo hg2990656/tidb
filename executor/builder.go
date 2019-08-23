@@ -870,31 +870,31 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 	}
 
 	// mei tuan
-	//e := &MergeJoinExec{
-	//	stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
-	//	baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
-	//	joiner: newJoiner(b.ctx, v.JoinType, v.JoinType == plannercore.RightOuterJoin,
-	//		defaultValues, v.OtherConditions,
-	//		retTypes(leftExec), retTypes(rightExec)),
-	//}
-
-	// parallel_merge_join exec
 	e := &MergeJoinExec{
 		stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
-		//compareFuncs: v.CompareFuncs,
-		joiner: newJoiner(
-			b.ctx,
-			v.JoinType,
-			v.JoinType == plannercore.RightOuterJoin,
-			defaultValues,
-			v.OtherConditions,
-			retTypes(leftExec),
-			retTypes(rightExec),
-		),
-		//isOuterJoin: v.JoinType.IsOuterJoin(),
-		//workerWg:      new(sync.WaitGroup),
+		joiner: newJoiner(b.ctx, v.JoinType, v.JoinType == plannercore.RightOuterJoin,
+			defaultValues, v.OtherConditions,
+			retTypes(leftExec), retTypes(rightExec)),
 	}
+
+	// parallel_merge_join exec
+	//e := &MergeJoinExec{
+	//	stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
+	//	baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
+	//	//compareFuncs: v.CompareFuncs,
+	//	joiner: newJoiner(
+	//		b.ctx,
+	//		v.JoinType,
+	//		v.JoinType == plannercore.RightOuterJoin,
+	//		defaultValues,
+	//		v.OtherConditions,
+	//		retTypes(leftExec),
+	//		retTypes(rightExec),
+	//	),
+	//	//isOuterJoin: v.JoinType.IsOuterJoin(),
+	//	//workerWg:      new(sync.WaitGroup),
+	//}
 
 	e.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftKeys))
 	for i := range v.LeftKeys {
@@ -918,6 +918,7 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 	//	keys:   leftKeys,
 	//}
 
+	//e.innerTable = &mergeJoinInnerTable{}
 	e.innerTable = mergeJoinInnerTable{}
 	e.innerTable.reader = rightExec
 	e.innerTable.joinKeys = rightKeys

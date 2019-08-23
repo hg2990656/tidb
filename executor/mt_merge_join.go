@@ -21,8 +21,8 @@ package executor
 //	"time"
 //
 //	"github.com/pingcap/errors"
-//	"github.com/pingcap/tidb/sessionctx"
 //	"github.com/pingcap/tidb/expression"
+//	"github.com/pingcap/tidb/sessionctx"
 //	"github.com/pingcap/tidb/sessionctx/stmtctx"
 //	"github.com/pingcap/tidb/util/chunk"
 //	"github.com/pingcap/tidb/util/memory"
@@ -255,12 +255,15 @@ package executor
 //	}()
 //
 //	fetchResult := &outerFetchResult{}
-//	err := ow.outerTable.init(ctx, ow.outerTable.reader.newFirstChunk())
+//	err := ow.outerTable.init(ctx, newFirstChunk(ow.outerTable.reader))
 //	if err != nil {
 //		fetchResult.err = err
 //		ow.outerFetchResultCh <- fetchResult
 //		return
 //	}
+//
+//	endRow := ow.outerTable.curIter.End()
+//	fmt.Println(endRow)
 //
 //	for {
 //		fetchResult.fetchRow, fetchResult.err = ow.outerTable.rowsWithSameKey()
@@ -284,7 +287,7 @@ package executor
 //	}()
 //
 //	fetchResult := &innerFetchResult{}
-//	err := iw.innerTable.init(ctx, iw.innerTable.reader.newFirstChunk())
+//	err := iw.innerTable.init(ctx, newFirstChunk(iw.innerTable.reader))
 //	if err != nil {
 //		fetchResult.err = err
 //		iw.innerResultCh <- fetchResult
@@ -477,8 +480,9 @@ package executor
 //	t.sameKeyRows = append(t.sameKeyRows, t.firstRow4Key)
 //	for {
 //		selectedRow, err := t.nextRow()
+//		endRow := t.curIter.End()
 //		// error happens or no more data.
-//		if err != nil || selectedRow == t.curIter.End() {
+//		if err != nil || selectedRow == endRow {
 //			t.firstRow4Key = t.curIter.End()
 //			return t.sameKeyRows, errors.Trace(err)
 //		}
@@ -497,7 +501,8 @@ package executor
 //		if t.curRow == t.curIter.End() {
 //			t.reallocReaderResult()
 //			oldMemUsage := t.curResult.MemoryUsage()
-//			err := t.reader.Next(t.ctx, chunk.NewRecordBatch(t.curResult))
+//			//err := t.reader.Next(t.ctx, chunk.NewRecordBatch(t.curResult))
+//			err := Next(t.ctx, t.reader, t.curResult)
 //			numRows := t.curResult.NumRows()
 //			// error happens or no more data.
 //			if err != nil || numRows == 0 {
@@ -539,7 +544,7 @@ package executor
 //	}
 //
 //	// NOTE: "t.curResult" is always the last element of "resultQueue".
-//	t.curResult = t.reader.newFirstChunk()
+//	t.curResult = newFirstChunk(t.reader)
 //	t.curIter = chunk.NewIterator4Chunk(t.curResult)
 //	t.curResult.Reset()
 //	t.curResultInUse = false
@@ -575,7 +580,7 @@ package executor
 //	joinChkResourceChs := make([]chan *chunk.Chunk, concurrency)
 //	for i := 0; i < concurrency; i++ {
 //		joinChkResourceChs[i] = make(chan *chunk.Chunk, 1)
-//		joinChkResourceChs[i] <- e.newFirstChunk()
+//		joinChkResourceChs[i] <- newFirstChunk(e)
 //	}
 //	e.joinChkResourceChs = joinChkResourceChs
 //
@@ -657,7 +662,7 @@ package executor
 //	return 0
 //}
 //
-//func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.RecordBatch) error {
+//func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.Chunk) error {
 //	if e.runtimeStats != nil {
 //		start := time.Now()
 //		defer func() { e.runtimeStats.Record(time.Since(start), req.NumRows()) }()
