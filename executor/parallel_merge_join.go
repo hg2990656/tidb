@@ -186,13 +186,13 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	return nil
 }
 
-func (e *MergeJoinExec) newOuterFetchWorker(outerFetchResultCh chan<- *outerFetchResult, resultCh, innerCh chan *mergeTask) *outerFetchWorker {
+func (e *MergeJoinExec) newOuterFetchWorker(outerFetchResultCh chan<- *outerFetchResult, taskCh, mergeJoinWorkerMergeTaskCh chan *mergeTask) *outerFetchWorker {
 	return &outerFetchWorker{
 		outerTable:         e.outerTable,
 		outerFetchResultCh: outerFetchResultCh,
 		ctx:                e.ctx,
-		resultCh:           resultCh,
-		innerCh:            innerCh,
+		resultCh:           taskCh,
+		innerCh:            mergeJoinWorkerMergeTaskCh,
 		maxChunkSize:       e.maxChunkSize,
 	}
 }
@@ -204,10 +204,10 @@ func (e *MergeJoinExec) newOuterFetchWorker(outerFetchResultCh chan<- *outerFetc
 //	}
 //}
 
-func (e *MergeJoinExec) newMergeJoinWorker(workerId int, mergeTaskCh chan *mergeTask, joinChkResourceCh chan *chunk.Chunk) *mergeJoinWorker {
+func (e *MergeJoinExec) newMergeJoinWorker(workerId int, mergeJoinWorkerMergeTaskCh chan *mergeTask, joinChkResourceCh chan *chunk.Chunk) *mergeJoinWorker {
 	return &mergeJoinWorker{
 		closeCh:           e.closeCh,
-		mergeTaskCh:       mergeTaskCh,
+		mergeTaskCh:       mergeJoinWorkerMergeTaskCh,
 		joinChkResourceCh: joinChkResourceCh,
 		joiner:            e.joiner,
 		maxChunkSize:      e.maxChunkSize,
@@ -229,14 +229,12 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 	if err != nil {
 		return
 	}
-	endRow := ow.outerTable.curIter.End()
 
 	waitGroup := new(sync.WaitGroup)
 	joinResultCh := make(chan *mergeJoinWorkerResult)
 
 	for {
-		endRow = ow.outerTable.curIter.End()
-		if ow.outerTable.curRow == endRow {
+		if ow.outerTable.curRow == ow.outerTable.curIter.End() && ow.outerTable.firstRow4Key == ow.outerTable.curIter.End(){
 			//if ow.outerTable.curRow.Idx() == (ow.outerTable.curIter.Len() - 1) {
 			err := ow.fetchNextOuterChunk(ctx)
 			if err != nil || ow.outerTable.curResult.NumRows() == 0 {
@@ -250,6 +248,7 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 		}
 		mt := &mergeTask{waitGroup: waitGroup}
 		mt.outerRows = outerRows
+
 		if ow.outerTable.curRow == ow.outerTable.curIter.End() {
 			mt.lastTaskFlag = true
 		}
@@ -273,21 +272,27 @@ func (t *mergeJoinTable) getSameKeyRows() ([]chunk.Row, error) {
 	if t.firstRow4Key == t.curIter.End() {
 		return nil, nil
 	}
-	t.sameKeyRows = t.sameKeyRows[:0]
-	t.sameKeyRows = append(t.sameKeyRows, t.firstRow4Key)
+	var sameKeyRows []chunk.Row
+	//t.sameKeyRows = t.sameKeyRows[:0]
+	//t.sameKeyRows = append(t.sameKeyRows, t.firstRow4Key)
+	sameKeyRows = append(sameKeyRows, t.firstRow4Key)
 	for {
 		selectedRow, err := t.nextChunkRow2()
 		// error happens or no more data.
 		if err != nil || selectedRow == t.curIter.End() {
 			t.firstRow4Key = t.curIter.End()
-			return t.sameKeyRows, err
+			//return t.sameKeyRows, err
+			//sameKeyRows = append(sameKeyRows, )
+			return sameKeyRows, err
 		}
 		compareResult := compareIOChunkRow(t.compareFuncs, selectedRow, t.firstRow4Key, t.joinKeys, t.joinKeys)
 		if compareResult == 0 {
-			t.sameKeyRows = append(t.sameKeyRows, selectedRow)
+			//t.sameKeyRows = append(t.sameKeyRows, selectedRow)
+			sameKeyRows = append(sameKeyRows, selectedRow)
 		} else {
 			t.firstRow4Key = selectedRow
-			return t.sameKeyRows, nil
+			//return t.sameKeyRows, nil
+			return sameKeyRows, nil
 		}
 	}
 }
@@ -416,6 +421,40 @@ func (ow *outerFetchWorker) fetchNextOuterChunk(ctx context.Context) (err error)
 //	return nil
 //}
 
+//func (jw *mergeJoinWorker) run(ctx context.Context, wg *sync.WaitGroup) {
+//	var ok bool
+//	var mt *mergeTask
+//
+//	select {
+//	case <-ctx.Done():
+//		ok = false
+//	case <-jw.closeCh:
+//		ok = false
+//	case mt, ok = <-jw.mergeTaskCh:
+//	}
+//
+//	trap := false
+//
+//	if len(mt.outerRows) != 2 && len(mt.outerRows) != 3 {
+//		fmt.Println("1", mt.outerRows[0])
+//		trap = false
+//	}
+//
+//	if len(mt.outerRows) == 2 {
+//		fmt.Println("2", mt.outerRows[0])
+//		trap = false
+//	}
+//
+//	if len(mt.outerRows) == 3 {
+//		fmt.Println("3", mt.outerRows[0])
+//		trap = false
+//	}
+//
+//	if trap && ok{
+//
+//	}
+//}
+
 func (jw *mergeJoinWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 	//defer func(){
 	//	wg.Done()
@@ -433,10 +472,11 @@ func (jw *mergeJoinWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 
 	rowsWithSameKey, err := jw.innerTable.getSameKeyRows()
 
-	var mt *mergeTask
 	var s int
+	var mt *mergeTask
 	// 1.get merge task from outerFetchWorker
 	for {
+
 		select {
 		case <-ctx.Done():
 			ok = false
@@ -585,13 +625,14 @@ func (jw *mergeJoinWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 							}
 							continue
 						}
+					} else {
+						// the mergeTask is the last task in this chunk
+						for _, row := range rowsWithSameKey {
+							jw.innerCache = append(jw.innerCache, row)
+						}
+						// get the next chunk's first merge task
+						break
 					}
-					// the mergeTask is the last task in this chunk
-					for _, row := range rowsWithSameKey {
-						jw.innerCache = append(jw.innerCache, row)
-					}
-					// get the next chunk's first merge task
-					break
 				} else {
 					//var joinRows []chunk.Row
 					var innerIter4Row chunk.Iterator
