@@ -244,7 +244,7 @@ package executor
 //			}
 //		}
 //
-//		//mt.waitGroup.Done()
+//		mt.waitGroup.Done()
 //	}
 //}
 //
@@ -368,15 +368,15 @@ package executor
 //				}
 //			}
 //
-//			//waitGroup.Add(1)
+//			waitGroup.Add(1)
 //			mw.mergeWorkerTaskCh <- mt
 //			mw.taskCh <- mt
 //		}
 //
-//		//go func() {
-//		//	waitGroup.Wait()
-//		//	close(joinResultCh)
-//		//}()
+//		go func() {
+//			waitGroup.Wait()
+//			close(joinResultCh)
+//		}()
 //
 //		if !mw.fetchNextOuterSameKeyGroup(ctx) {
 //			return
