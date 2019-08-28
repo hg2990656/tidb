@@ -30,7 +30,7 @@ type MergeJoinExec struct {
 	isOuterJoin  bool
 	outerIdx     int
 
-	innerTable *mergeJoinInnerTable
+	innerTable mergeJoinInnerTable
 	outerTable *mergeJoinOuterTable
 
 	memTracker *memory.Tracker
@@ -89,7 +89,7 @@ type mergeJoinWorker struct {
 
 	innerCache []chunk.Row
 
-	innerTable *mergeJoinInnerTable
+	innerTable mergeJoinInnerTable
 
 	outerJoinKeys []*expression.Column
 	innerJoinKeys []*expression.Column
@@ -222,7 +222,6 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 	defer func() {
 		close(ow.resultCh)
 		close(ow.innerCh)
-		//wg.Done()
 	}()
 
 
@@ -231,7 +230,6 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 		return
 	}
 
-
 	//joinResultCh := make(chan *mergeJoinWorkerResult)
 	//waitGroup := new(sync.WaitGroup)
 
@@ -239,7 +237,6 @@ func (ow *outerFetchWorker) run(ctx context.Context, wg *sync.WaitGroup) {
 	//	waitGroup.Wait()
 	//	close(joinResultCh)
 	//}()
-
 
 	for {
 		if ow.outerTable.curRow == ow.outerTable.curIter.End() && ow.outerTable.firstRow4Key == ow.outerTable.curIter.End(){
