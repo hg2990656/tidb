@@ -461,13 +461,14 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 					return
 				}
 				if len(rowsWithSameKey) == 0 {
-					// 1.send doneCh to inner worker
+					// (1) send doneCh to inner worker
 					jw.doneCh <- true
-					// 2.then get the next inner chunk
+					// (2) then get the next inner chunk
 					if !jw.fetchNextInnerChunk(ctx) {
 						mt.joinResultCh <- joinResult
 						return
 					}
+					// TODO: test trap
 					trap = true
 					rowsWithSameKey, err = jw.innerRowsWithSameKey()
 					if err != nil {
@@ -478,22 +479,21 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 			}
 
 			// if cmpResult < 0, consider two situations:
-			// 1.do not get the next inner chunk, then do on miss match
+			// 1.do not get the next inner chunk, then do on miss match (tested)
 			// 2.has got the next inner chunk, but now outerRowsWithSameKey's join key value is equal to last inner chunk's last innerRowsWithSameKey
 			// and is smaller than this new inner chunk's first innerRowsWithSameKey
 			if cmpResult < 0 {
-				if trap {
-					if len(jw.innerCache) > 0 {
-						cmpCache := -1
-						cmpCache = compareIOChunkRow(jw.compareFuncs, mt.outerRows[0], jw.innerCache[0], jw.outerJoinKeys, jw.innerJoinKeys)
-						// now outerRowsWithSameKey's join key value is equal to last inner chunk's last innerRowsWithSameKey, do join with innerCache
-						if cmpCache == 0 {
-							innerIter4Row := chunk.NewIterator4Slice(jw.innerCache)
-							innerIter4Row.Begin()
+				// TODO: test trap
+				if trap && len(jw.innerCache) > 0 {
+					cmpCache := -1
+					cmpCache = compareIOChunkRow(jw.compareFuncs, mt.outerRows[0], jw.innerCache[0], jw.outerJoinKeys, jw.innerJoinKeys)
+					// now outerRowsWithSameKey's join key value is equal to last inner chunk's last innerRowsWithSameKey, do join with innerCache
+					if cmpCache == 0 {
+						innerIter4Row := chunk.NewIterator4Slice(jw.innerCache)
+						innerIter4Row.Begin()
 
-							ok = jw.tryToJoin(ctx, mt, innerIter4Row, joinResult)
-							return
-						}
+						ok = jw.tryToJoin(ctx, mt, innerIter4Row, joinResult)
+						return
 					}
 				}
 				// do on miss match
@@ -524,21 +524,36 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 						// (2) merge task is the last one in outer chunk and there is no more innerRowsWithSameKey in inner chunk - 1
 						jw.doneCh <- true
 						if !jw.fetchNextInnerChunk(ctx) {
-							// no next inner chunk, so just do join with now innerRowsWithSameKey
-							innerIter4Row := chunk.NewIterator4Slice(rowsWithSameKey)
-							innerIter4Row.Begin()
+							var innerIter4Row chunk.Iterator
+							// trap = true, innerRowsWithSameKey contain all the rows of the second inner chunk and it's join key
+							// is equal to the last innerRowsWithSameKey in the first inner chunk
+							if trap && len(jw.innerCache) > 0 {
+								for _, row := range rowsWithSameKey {
+									jw.innerCache = append(jw.innerCache, row)
+								}
+								innerIter4Row = chunk.NewIterator4Slice(jw.innerCache)
+								innerIter4Row.Begin()
+							} else {
+								// no next inner chunk and no jw.innerCache, so just do join with now innerRowsWithSameKey
+								innerIter4Row = chunk.NewIterator4Slice(rowsWithSameKey)
+								innerIter4Row.Begin()
+							}
 
 							ok = jw.tryToJoin(ctx, mt, innerIter4Row, joinResult)
+							jw.innerCache = jw.innerCache[:0]
+							trap = false
 							if !ok {
 								return
 							}
+
 						} else {
+							// TODO: test
 							// there is next inner chunk, so add now innerRowsWithSameKey to jw.innerCache,
 							// then get next innerRowsWithSameKey from new inner chunk
+							trap = true
 							for _, row := range rowsWithSameKey {
 								jw.innerCache = append(jw.innerCache, row)
 							}
-							trap = true
 							rowsWithSameKey, err = jw.innerRowsWithSameKey()
 							if err != nil {
 								return
@@ -546,27 +561,59 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 							continue
 						}
 					} else {
-						// here are three situations:
+						// here are three situations (all tested):
 						// (1) merge task is not the last one in outer chunk and jw.curInnerRow == jw.innerIter4Row.End() but jw.firstRow4Key != jw.innerIter4Row.End() - 4
 						// (2) merge task is the last one in outer chunk and jw.curInnerRow == jw.innerIter4Row.End() but jw.firstRow4Key != jw.innerIter4Row.End() - 2
 						// (3) merge task is the last one in outer chunk and jw.curInnerRow != jw.innerIter4Row.End() - 2
-						innerIter4Row := chunk.NewIterator4Slice(rowsWithSameKey)
-						innerIter4Row.Begin()
+						var innerIter4Row chunk.Iterator
+						if trap && len(jw.innerCache) > 0 {
+							for _, row := range rowsWithSameKey {
+								jw.innerCache = append(jw.innerCache, row)
+							}
+
+							innerIter4Row = chunk.NewIterator4Slice(jw.innerCache)
+							innerIter4Row.Begin()
+						} else {
+							innerIter4Row = chunk.NewIterator4Slice(rowsWithSameKey)
+							innerIter4Row.Begin()
+						}
 
 						ok = jw.tryToJoin(ctx, mt, innerIter4Row, joinResult)
+						jw.innerCache = jw.innerCache[:0]
+						trap = false
 						if !ok {
 							return
 						}
 					}
 				} else {
-					// here are one situation:
+					// here are one situation (tested):
 					// (1) merge task is not the last one in outer chunk and innerRowWithSameKey is not also the last one in inner chunk
 					// note: here may be the first merge task in the second outer chunk, but this join worker may not be the last join worker
-					// which dealt the last merge task in the first outer chunk, so it is no needed to compare with jw.innerCache
-					innerIter4Row := chunk.NewIterator4Slice(rowsWithSameKey)
-					innerIter4Row.Begin()
+					// which dealt the last merge task in the first outer chunk, so it is no needed to check firstTaskFlag and compare with jw.innerCache
+					// but it needs to compare with jw.innerCache when the innerRowsWithSameKey is the first one of the second inner chunk
+					var innerIter4Row chunk.Iterator
+					// the innerRowsWithSameKey is the first one in the second inner chunk as trap = true
+					if trap && len(jw.innerCache) > 0 {
+						cmpCache := -1
+						cmpCache = compareIOChunkRow(jw.compareFuncs, mt.outerRows[0], jw.innerCache[0], jw.outerJoinKeys, jw.innerJoinKeys)
+						if cmpCache == 0 {
+							for _, row := range rowsWithSameKey {
+								jw.innerCache = append(jw.innerCache, row)
+							}
+							innerIter4Row = chunk.NewIterator4Slice(jw.innerCache)
+							innerIter4Row.Begin()
+						} else {
+							innerIter4Row = chunk.NewIterator4Slice(rowsWithSameKey)
+							innerIter4Row.Begin()
+						}
+					} else {
+						innerIter4Row = chunk.NewIterator4Slice(rowsWithSameKey)
+						innerIter4Row.Begin()
+					}
 
 					ok = jw.tryToJoin(ctx, mt, innerIter4Row, joinResult)
+					jw.innerCache = jw.innerCache[:0]
+					trap = false
 					if !ok {
 						return
 					}
