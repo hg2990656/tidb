@@ -1,3 +1,16 @@
+// Copyright 2017 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package executor
 
 import (
@@ -330,7 +343,9 @@ func (ow *outerFetchWorker) fetchNextOuterChunk(ctx context.Context) (err error)
 	if err != nil {
 		return err
 	}
-	ow.outerTable.curRow = ow.outerTable.curIter.Begin()
+	//ow.outerTable.curRow = ow.outerTable.curIter.Begin()
+	ow.outerTable.firstRow4Key = ow.outerTable.curIter.Begin()
+	ow.outerTable.curRow = ow.outerTable.curIter.Next()
 	return nil
 }
 
@@ -420,37 +435,39 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 	}
 
 	// 2.get merge task from outerFetchWorker
-	var s int
+	//var s int
 	var mt *mergeTask
 
 	for {
 		select {
 		case <-ctx.Done():
 			ok = false
-			s = 1
+			//s = 1
 		case <-jw.closeCh:
 			ok = false
-			s = 2
+			//s = 2
 		case mt, ok = <-jw.mergeTaskCh:
-			s = 3
+			//s = 3
 		}
 
 		if !ok {
 			jw.closedCh <- true
-			fmt.Println("Number ", i, " goroutine close for:", s)
+			//fmt.Println("Number ", i, " goroutine close for:", s)
 			return
 		}
 
+		fmt.Println("goroutine", i, "deals with Merge Task number:", mt.number)
+
 		// whether get the next inner chunk
 		trap := false
-
-		fmt.Println("goroutine", i, "deals with Merge Task number:", mt.number)
 
 		// 3.get the sameKeyGroup inner rows from inner chunk and compare with outer table rows in merge task
 		for {
 			cmpResult := -1
 
-			cmpResult = compareIOChunkRow(jw.compareFuncs, mt.outerRows[0], rowsWithSameKey[0], jw.outerJoinKeys, jw.innerJoinKeys)
+			if len(rowsWithSameKey) > 0 {
+				cmpResult = compareIOChunkRow(jw.compareFuncs, mt.outerRows[0], rowsWithSameKey[0], jw.outerJoinKeys, jw.innerJoinKeys)
+			}
 
 			// if cmpResult > 0, outerRows's join key value is greater than innerRowsWithSameKey's join key value
 			// then get the next innerRowsWithSameKey from inner chunk
@@ -468,7 +485,7 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 						close(mt.joinResultCh)
 						break
 					}
-					// TODO: test trap
+					// tested trap: 2019-09-02 10:45
 					trap = true
 					rowsWithSameKey, err = jw.innerRowsWithSameKey()
 					if err != nil {
@@ -819,13 +836,12 @@ func (e *MergeJoinExec) getNextTask(ctx context.Context) *mergeTask {
 }
 
 func (t *mergeJoinTable) reAllocReaderResult() {
-	if !t.curResultInUse {
-		// If "t.curResult" is not in use, we can just reuse it.
-		t.curResult.Reset()
-		return
-	}
+	//if !t.curResultInUse {
+	//	// If "t.curResult" is not in use, we can just reuse it.
+	//	t.curResult.Reset()
+	//	return
+	//}
 
-	// NOTE: "t.curResult" is always the last element of "resultQueue".
 	t.curResult = newFirstChunk(t.reader)
 	t.curIter = chunk.NewIterator4Chunk(t.curResult)
 	t.curResult.Reset()
