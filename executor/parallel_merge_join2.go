@@ -96,6 +96,7 @@ type mergeJoinWorker struct {
 	innerJoinKeys []*expression.Column
 
 	doneCh          chan<- bool
+	closedCh        chan<- bool
 	rowsWithSameKey []chunk.Row
 }
 
@@ -129,6 +130,7 @@ type innerFetchWorker struct {
 	innerTable    *mergeJoinInnerTable
 	innerResultCh chan<- *innerFetchResult
 	doneCh        <-chan bool
+	closedCh      <-chan bool
 }
 
 // Open implements the Executor Open interface.
@@ -157,12 +159,13 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 
 	innerFetchResultCh := make(chan *innerFetchResult, concurrency)
 	doneCh := make(chan bool, concurrency)
-	iw := e.newInnerFetchWorker(innerFetchResultCh, doneCh)
+	closedCh := make(chan bool, concurrency)
+	iw := e.newInnerFetchWorker(innerFetchResultCh, doneCh, closedCh)
 	go iw.run(ctx, concurrency)
 
 	mergeJoinWorkerMergeTaskCh := make(chan *mergeTask, concurrency)
 	for i := 0; i < concurrency; i++ {
-		mw := e.newMergeJoinWorker(i, innerFetchResultCh, mergeJoinWorkerMergeTaskCh, joinChkResourceChs[i], doneCh)
+		mw := e.newMergeJoinWorker(i, innerFetchResultCh, mergeJoinWorkerMergeTaskCh, joinChkResourceChs[i], doneCh, closedCh)
 		go mw.run(ctx, i)
 	}
 
@@ -172,11 +175,12 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	return nil
 }
 
-func (e *MergeJoinExec) newInnerFetchWorker(innerResultCh chan<- *innerFetchResult, doneCh chan bool) *innerFetchWorker {
+func (e *MergeJoinExec) newInnerFetchWorker(innerResultCh chan<- *innerFetchResult, doneCh, closedCh chan bool) *innerFetchWorker {
 	return &innerFetchWorker{
 		innerResultCh: innerResultCh,
 		innerTable:    e.innerTable,
 		doneCh:        doneCh,
+		closedCh:      closedCh,
 	}
 }
 
@@ -190,7 +194,7 @@ func (e *MergeJoinExec) newOuterFetchWorker(taskCh, mergeJoinWorkerMergeTaskCh c
 	}
 }
 
-func (e *MergeJoinExec) newMergeJoinWorker(workerId int, innerFetchResultCh chan *innerFetchResult, mergeJoinWorkerMergeTaskCh chan *mergeTask, joinChkResourceCh chan *chunk.Chunk, doneCh chan<- bool) *mergeJoinWorker {
+func (e *MergeJoinExec) newMergeJoinWorker(workerId int, innerFetchResultCh chan *innerFetchResult, mergeJoinWorkerMergeTaskCh chan *mergeTask, joinChkResourceCh chan *chunk.Chunk, doneCh, closedCh chan<- bool) *mergeJoinWorker {
 	return &mergeJoinWorker{
 		closeCh:            e.closeCh,
 		innerFetchResultCh: innerFetchResultCh,
@@ -202,6 +206,7 @@ func (e *MergeJoinExec) newMergeJoinWorker(workerId int, innerFetchResultCh chan
 		innerJoinKeys:      e.innerTable.joinKeys,
 		compareFuncs:       e.compareFuncs,
 		doneCh:             doneCh,
+		closedCh:           closedCh,
 	}
 }
 
@@ -346,13 +351,18 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 	}
 
 	var count int
-	var ok, done bool
+	var ok, done, closed bool
+	alive := concurrency
 
 	for {
 		select {
 		case <-ctx.Done():
 			ok = false
 		case done, ok = <-iw.doneCh:
+		case closed, ok = <-iw.closedCh:
+			if closed {
+				alive = alive - 1
+			}
 		}
 
 		if !ok {
@@ -361,7 +371,7 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 
 		if done {
 			count += 1
-			if count == concurrency {
+			if count == alive {
 				fetchResult = &innerFetchResult{}
 				// a new chunk is needed, otherwise the columns in joinWorker's outerRowsWithSameKey will be cleared
 				iw.innerTable.curResult = newFirstChunk(iw.innerTable.reader)
@@ -373,7 +383,7 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 
 				fetchResult.fetchChunk = iw.innerTable.curResult
 				fetchResult.err = err
-				for i := 0; i < concurrency; i++ {
+				for i := 0; i < alive; i++ {
 					iw.innerResultCh <- fetchResult
 				}
 
@@ -420,6 +430,7 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 		}
 
 		if !ok {
+			jw.closedCh <- true
 			fmt.Println("Number ", i, " goroutine close for:", s)
 			return
 		}
@@ -654,7 +665,8 @@ func (jw *mergeJoinWorker) fetchNextInnerChunk(ctx context.Context) bool {
 func (jw *mergeJoinWorker) tryToJoin(ctx context.Context, mt *mergeTask, innerIter4Row chunk.Iterator, joinResult *mergeJoinWorkerResult) bool {
 	ok := true
 	hasMatch := false
-	for _, outerRow := range mt.outerRows {
+	for idx := 0; idx < len(mt.outerRows); {
+		outerRow := mt.outerRows[idx]
 		matched, _, err := jw.joiner.tryToMatch(outerRow, innerIter4Row, joinResult.chk)
 		if err != nil {
 			joinResult.err = errors.Trace(err)
@@ -670,6 +682,7 @@ func (jw *mergeJoinWorker) tryToJoin(ctx context.Context, mt *mergeTask, innerIt
 			}
 			hasMatch = false
 			innerIter4Row.Begin()
+			idx++
 		}
 
 		if joinResult.chk.NumRows() >= jw.maxChunkSize {
