@@ -552,6 +552,7 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 								for _, row := range rowsWithSameKey {
 									jw.innerCache = append(jw.innerCache, row)
 								}
+								//jw.innerCache = append(jw.innerCache, rowsWithSameKey...)
 								innerIter4Row = chunk.NewIterator4Slice(jw.innerCache)
 								innerIter4Row.Begin()
 							} else {
