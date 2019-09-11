@@ -36,22 +36,23 @@ type MergeJoinExec struct {
 	baseExecutor
 
 	stmtCtx      *stmtctx.StatementContext
-	compareFuncs []expression.CompareFunc
+	//compareFuncs []expression.CompareFunc //
 	joiner       joiner
-	isOuterJoin  bool
-
-	prepared bool
-	outerIdx int
-
-	innerTable *mergeJoinInnerTable
-	outerTable *mergeJoinOuterTable
-
-	innerRows     []chunk.Row
-	innerIter4Row chunk.Iterator
-
-	childrenResults []*chunk.Chunk
+	//isOuterJoin  bool //
+	//
+	//prepared bool //
+	//outerIdx int //
+	//
+	//innerTable *mergeJoinInnerTable //
+	//outerTable *mergeJoinOuterTable //
+	//
+	//innerRows     []chunk.Row //
+	//innerIter4Row chunk.Iterator //
+	//
+	childrenResults []*chunk.Chunk //
 
 	memTracker *memory.Tracker
+	adaptor Adaptor
 }
 
 type mergeJoinOuterTable struct {
@@ -214,17 +215,25 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 		return err
 	}
 
-	e.prepared = false
-	e.memTracker = memory.NewTracker(e.id, e.ctx.GetSessionVars().MemQuotaMergeJoin)
-	e.memTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
-
-	e.childrenResults = make([]*chunk.Chunk, 0, len(e.children))
-	for _, child := range e.children {
-		e.childrenResults = append(e.childrenResults, newFirstChunk(child))
+	adapter, ok := e.adaptor.(*MergeJoinAdapter)
+	if !ok {
+		panic("Adaptor type missmatch!")
 	}
+	//adapter.InitAdaptor("mergeJoin")
+	//adapter.strategy = adapter.Adapt()
+	adapter.strategy.Init(e)
 
-	e.innerTable.memTracker = memory.NewTracker(innerTableLabel, -1)
-	e.innerTable.memTracker.AttachTo(e.memTracker)
+	//psprepared = false
+	//psmemTracker = memory.NewTracker(psid, psctx.GetSessionVars().MemQuotaMergeJoin)
+	//psmemTracker.AttachTo(psctx.GetSessionVars().StmtCtx.MemTracker)
+	//
+	//pschildrenResults = make([]*chunk.Chunk, 0, len(pschildren))
+	//for _, child := range pschildren {
+	//	pschildrenResults = append(pschildrenResults, newFirstChunk(child))
+	//}
+	//
+	//psinnerTable.memTracker = memory.NewTracker(innerTableLabel, -1)
+	//psinnerTable.memTracker.AttachTo(psmemTracker)
 
 	return nil
 }
@@ -239,82 +248,98 @@ func compareChunkRow(cmpFuncs []chunk.CompareFunc, lhsRow, rhsRow chunk.Row, lhs
 	return 0
 }
 
-func (e *MergeJoinExec) prepare(ctx context.Context, requiredRows int) error {
-	err := e.innerTable.init(ctx, e.childrenResults[e.outerIdx^1])
+func (os *originMergeJoinStrategy) prepare(ctx context.Context, mergeJoinExec Executor, requiredRows int) error {
+	e, ok := mergeJoinExec.(*MergeJoinExec)
+	if !ok {
+		panic("type error")
+	}
+	err := os.innerTable.init(ctx, e.childrenResults[os.outerIdx^1])
 	if err != nil {
 		return err
 	}
 
-	err = e.fetchNextInnerRows()
+	err = os.fetchNextInnerRows()
 	if err != nil {
 		return err
 	}
 
 	// init outer table.
-	e.outerTable.chk = e.childrenResults[e.outerIdx]
-	e.outerTable.iter = chunk.NewIterator4Chunk(e.outerTable.chk)
-	e.outerTable.selected = make([]bool, 0, e.maxChunkSize)
+	os.outerTable.chk = e.childrenResults[os.outerIdx]
+	os.outerTable.iter = chunk.NewIterator4Chunk(os.outerTable.chk)
+	os.outerTable.selected = make([]bool, 0, e.maxChunkSize)
 
-	err = e.fetchNextOuterRows(ctx, requiredRows)
+	err = os.fetchNextOuterRows(ctx, e, requiredRows)
 	if err != nil {
 		return err
 	}
 
-	e.prepared = true
+	os.prepared = true
 	return nil
 }
 
 // Next implements the Executor Next interface.
 func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.Chunk) error {
-	req.Reset()
-	if !e.prepared {
-		if err := e.prepare(ctx, req.RequiredRows()); err != nil {
-			return err
-		}
+	adaptor, ok := e.adaptor.(*MergeJoinAdapter)
+	if !ok {
+		panic("Adaptor type missmatch!")
 	}
-
-	for !req.IsFull() {
-		hasMore, err := e.joinToChunk(ctx, req)
-		if err != nil || !hasMore {
-			return err
-		}
+	err := adaptor.strategy.Exec(ctx, e, req)
+	if err != nil {
+		return err
 	}
+	//req.Reset()
+	//if !psprepared {
+	//	if err := psprepare(ctx, req.RequiredRows()); err != nil {
+	//		return err
+	//	}
+	//}
+	//
+	//for !req.IsFull() {
+	//	hasMore, err := psjoinToChunk(ctx, req)
+	//	if err != nil || !hasMore {
+	//		return err
+	//	}
+	//}
 	return nil
 }
 
-func (e *MergeJoinExec) joinToChunk(ctx context.Context, chk *chunk.Chunk) (hasMore bool, err error) {
+func (os *originMergeJoinStrategy) joinToChunk(ctx context.Context, mergeJoinExec Executor, chk *chunk.Chunk) (hasMore bool, err error) {
+	e, ok := mergeJoinExec.(*MergeJoinExec)
+	if !ok {
+		panic("type error")
+	}
 	for {
-		if e.outerTable.row == e.outerTable.iter.End() {
-			err = e.fetchNextOuterRows(ctx, chk.RequiredRows()-chk.NumRows())
-			if err != nil || e.outerTable.chk.NumRows() == 0 {
+		if os.outerTable.row == os.outerTable.iter.End() {
+			err = os.fetchNextOuterRows(ctx, e, chk.RequiredRows()-chk.NumRows())
+			if err != nil || os.outerTable.chk.NumRows() == 0 {
 				return false, err
 			}
 		}
 
 		cmpResult := -1
-		if e.outerTable.selected[e.outerTable.row.Idx()] && len(e.innerRows) > 0 {
-			cmpResult, err = e.compare(e.outerTable.row, e.innerIter4Row.Current())
+		if os.outerTable.selected[os.outerTable.row.Idx()] && len(os.innerRows) > 0 {
+			cmpResult, err = os.compare(e, os.outerTable.row, os.innerIter4Row.Current())
 			if err != nil {
 				return false, err
 			}
 		}
 
 		if cmpResult > 0 {
-			if err = e.fetchNextInnerRows(); err != nil {
+			if err = os.fetchNextInnerRows(); err != nil {
 				return false, err
 			}
 			continue
 		}
 
 		if cmpResult < 0 {
-			e.joiner.onMissMatch(false, e.outerTable.row, chk)
+			e.joiner.onMissMatch(false, os.outerTable.row, chk)
 			if err != nil {
 				return false, err
 			}
 
-			e.outerTable.row = e.outerTable.iter.Next()
-			e.outerTable.hasMatch = false
-			e.outerTable.hasNull = false
+			os.outerTable.row = os.outerTable.iter.Next()
+			os.outerTable.hasMatch = false
+			os.outerTable.hasNull = false
 
 			if chk.IsFull() {
 				return true, nil
@@ -322,21 +347,21 @@ func (e *MergeJoinExec) joinToChunk(ctx context.Context, chk *chunk.Chunk) (hasM
 			continue
 		}
 
-		matched, isNull, err := e.joiner.tryToMatch(e.outerTable.row, e.innerIter4Row, chk)
+		matched, isNull, err := e.joiner.tryToMatch(os.outerTable.row, os.innerIter4Row, chk)
 		if err != nil {
 			return false, err
 		}
-		e.outerTable.hasMatch = e.outerTable.hasMatch || matched
-		e.outerTable.hasNull = e.outerTable.hasNull || isNull
+		os.outerTable.hasMatch = os.outerTable.hasMatch || matched
+		os.outerTable.hasNull = os.outerTable.hasNull || isNull
 
-		if e.innerIter4Row.Current() == e.innerIter4Row.End() {
-			if !e.outerTable.hasMatch {
-				e.joiner.onMissMatch(e.outerTable.hasNull, e.outerTable.row, chk)
+		if os.innerIter4Row.Current() == os.innerIter4Row.End() {
+			if !os.outerTable.hasMatch {
+				e.joiner.onMissMatch(os.outerTable.hasNull, os.outerTable.row, chk)
 			}
-			e.outerTable.row = e.outerTable.iter.Next()
-			e.outerTable.hasMatch = false
-			e.outerTable.hasNull = false
-			e.innerIter4Row.Begin()
+			os.outerTable.row = os.outerTable.iter.Next()
+			os.outerTable.hasMatch = false
+			os.outerTable.hasNull = false
+			os.innerIter4Row.Begin()
 		}
 
 		if chk.IsFull() {
@@ -345,11 +370,15 @@ func (e *MergeJoinExec) joinToChunk(ctx context.Context, chk *chunk.Chunk) (hasM
 	}
 }
 
-func (e *MergeJoinExec) compare(outerRow, innerRow chunk.Row) (int, error) {
-	outerJoinKeys := e.outerTable.keys
-	innerJoinKeys := e.innerTable.joinKeys
+func (os *originMergeJoinStrategy) compare(mergeJoinExec Executor, outerRow, innerRow chunk.Row) (int, error) {
+	e, ok := mergeJoinExec.(*MergeJoinExec)
+	if !ok {
+		panic("error")
+	}
+	outerJoinKeys := os.outerTable.keys
+	innerJoinKeys := os.innerTable.joinKeys
 	for i := range outerJoinKeys {
-		cmp, _, err := e.compareFuncs[i](e.ctx, outerJoinKeys[i], innerJoinKeys[i], outerRow, innerRow)
+		cmp, _, err := os.compareFuncs[i](e.ctx, outerJoinKeys[i], innerJoinKeys[i], outerRow, innerRow)
 		if err != nil {
 			return 0, err
 		}
@@ -363,36 +392,44 @@ func (e *MergeJoinExec) compare(outerRow, innerRow chunk.Row) (int, error) {
 
 // fetchNextInnerRows fetches the next join group, within which all the rows
 // have the same join key, from the inner table.
-func (e *MergeJoinExec) fetchNextInnerRows() (err error) {
-	e.innerRows, err = e.innerTable.rowsWithSameKey()
+func (os *originMergeJoinStrategy) fetchNextInnerRows() (err error) {
+	//e, ok := mergeJoinExec.(*MergeJoinExec)
+	//if !ok {
+	//	panic("type error")
+	//}
+	os.innerRows, err = os.innerTable.rowsWithSameKey()
 	if err != nil {
 		return err
 	}
-	e.innerIter4Row = chunk.NewIterator4Slice(e.innerRows)
-	e.innerIter4Row.Begin()
+	os.innerIter4Row = chunk.NewIterator4Slice(os.innerRows)
+	os.innerIter4Row.Begin()
 	return nil
 }
 
 // fetchNextOuterRows fetches the next Chunk of outer table. Rows in a Chunk
 // may not all belong to the same join key, but are guaranteed to be sorted
 // according to the join key.
-func (e *MergeJoinExec) fetchNextOuterRows(ctx context.Context, requiredRows int) (err error) {
+func (os *originMergeJoinStrategy) fetchNextOuterRows(ctx context.Context, mergeJoinExec Executor, requiredRows int) (err error) {
+	e, ok := mergeJoinExec.(*MergeJoinExec)
+	if !ok {
+		panic("error")
+	}
 	// It's hard to calculate selectivity if there is any filter or it's inner join,
 	// so we just push the requiredRows down when it's outer join and has no filter.
-	if e.isOuterJoin && len(e.outerTable.filter) == 0 {
-		e.outerTable.chk.SetRequiredRows(requiredRows, e.maxChunkSize)
+	if os.isOuterJoin && len(os.outerTable.filter) == 0 {
+		os.outerTable.chk.SetRequiredRows(requiredRows, e.maxChunkSize)
 	}
 
-	err = Next(ctx, e.outerTable.reader, e.outerTable.chk)
+	err = Next(ctx, os.outerTable.reader, os.outerTable.chk)
 	if err != nil {
 		return err
 	}
 
-	e.outerTable.iter.Begin()
-	e.outerTable.selected, err = expression.VectorizedFilter(e.ctx, e.outerTable.filter, e.outerTable.iter, e.outerTable.selected)
+	os.outerTable.iter.Begin()
+	os.outerTable.selected, err = expression.VectorizedFilter(e.ctx, os.outerTable.filter, os.outerTable.iter, os.outerTable.selected)
 	if err != nil {
 		return err
 	}
-	e.outerTable.row = e.outerTable.iter.Begin()
+	os.outerTable.row = os.outerTable.iter.Begin()
 	return nil
 }

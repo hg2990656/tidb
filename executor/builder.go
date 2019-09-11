@@ -926,10 +926,24 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 		}
 	}
 
+	// adaptor
+	mergeJoinAdaptor := &MergeJoinAdapter{}
+
+    register := mergeJoinAdaptor.initRegister()
+	register.Register("mergeJoin", func() (ParamGenerator, SceneGenerator){
+		fmt.Println("init merge join ParamGenerator and merge join SceneGenerator...")
+		return &MergeJoinPG{}, &MergeJoinSG{}
+	})
+
+    mergeJoinAdaptor.addRegister(register)
+
+	mergeJoinAdaptor.InitAdaptor("mergeJoin")
+	mergeJoinAdaptor.strategy = mergeJoinAdaptor.Adapt(v, leftExec, rightExec)
+
 	e := &MergeJoinExec{
 		stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
-		compareFuncs: v.CompareFuncs,
+		//compareFuncs: v.CompareFuncs,
 		joiner: newJoiner(
 			b.ctx,
 			v.JoinType,
@@ -939,35 +953,40 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 			retTypes(leftExec),
 			retTypes(rightExec),
 		),
-		isOuterJoin: v.JoinType.IsOuterJoin(),
+		//isOuterJoin: v.JoinType.IsOuterJoin(),
+		adaptor: mergeJoinAdaptor,
 	}
 
-	leftKeys := v.LeftJoinKeys
-	rightKeys := v.RightJoinKeys
+	//leftKeys := v.LeftJoinKeys
+	//rightKeys := v.RightJoinKeys
 
-	e.outerIdx = 0
+	//e.outerIdx = 0
 	innerFilter := v.RightConditions
 
-	e.innerTable = &mergeJoinInnerTable{
-		reader:   rightExec,
-		joinKeys: rightKeys,
-	}
+	//e.innerTable = &mergeJoinInnerTable{
+	//	reader:   rightExec,
+	//	joinKeys: rightKeys,
+	//}
 
-	e.outerTable = &mergeJoinOuterTable{
-		reader: leftExec,
-		filter: v.LeftConditions,
-		keys:   leftKeys,
-	}
+	//e.outerTable = &mergeJoinOuterTable{
+	//	reader: leftExec,
+	//	filter: v.LeftConditions,
+	//	keys:   leftKeys,
+	//}
+
+	//if v.JoinType == plannercore.RightOuterJoin {
+	//	e.outerIdx = 1
+	//	e.outerTable.reader = rightExec
+	//	e.outerTable.filter = v.RightConditions
+	//	e.outerTable.keys = rightKeys
+	//
+	//	innerFilter = v.LeftConditions
+	//	e.innerTable.reader = leftExec
+	//	e.innerTable.joinKeys = leftKeys
+	//}
 
 	if v.JoinType == plannercore.RightOuterJoin {
-		e.outerIdx = 1
-		e.outerTable.reader = rightExec
-		e.outerTable.filter = v.RightConditions
-		e.outerTable.keys = rightKeys
-
 		innerFilter = v.LeftConditions
-		e.innerTable.reader = leftExec
-		e.innerTable.joinKeys = leftKeys
 	}
 
 	// optimizer should guarantee that filters on inner table are pushed down
