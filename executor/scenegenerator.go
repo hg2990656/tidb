@@ -8,9 +8,9 @@ type SceneGenerator interface {
 }
 
 //Define our own sceneGenerator HashJoinSG to implements interface SceneGenerator.
-type MergeJoinSG struct {}
+type MergeJoinSG struct{}
 
-func (mjSG *MergeJoinSG) GenScene(hwInfo *HardWareInfo, statsInfo *StatsInfo) Scene{
+func (mjSG *MergeJoinSG) GenScene(hwInfo *HardWareInfo, statsInfo *StatsInfo) Scene {
 	fmt.Println("analyze hardware information and statistic information and generate our own scene...")
 	// analyze the balance of data. calculate variance of mcvFreqs
 	mcvFreqs := statsInfo.mostCommonFreqs
@@ -18,10 +18,10 @@ func (mjSG *MergeJoinSG) GenScene(hwInfo *HardWareInfo, statsInfo *StatsInfo) Sc
 	fmt.Println(variance)
 
 	scene := &MergeJoinScene{
-		baseScene:baseScene{statsInfo, hwInfo},
-		balanceDegree:[]float32{variance, variance},
-		cpuUsageRate:[]float32{hwInfo.cpuUsageRate, hwInfo.cpuUsageRate},
-		memUsageRate:[]float32{hwInfo.memUsageRate, hwInfo.memUsageRate},
+		baseScene:     baseScene{statsInfo, hwInfo},
+		balanceDegree: []float32{variance, variance},
+		cpuUsageRate:  []float32{hwInfo.cpuUsageRate, hwInfo.cpuUsageRate},
+		memUsageRate:  []float32{hwInfo.memUsageRate, hwInfo.memUsageRate},
 	}
 	return scene
 }
@@ -29,4 +29,3 @@ func (mjSG *MergeJoinSG) GenScene(hwInfo *HardWareInfo, statsInfo *StatsInfo) Sc
 func getVariance(mvcFreqs []float32) float32 {
 	return 0
 }
-

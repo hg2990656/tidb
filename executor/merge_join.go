@@ -35,9 +35,9 @@ import (
 type MergeJoinExec struct {
 	baseExecutor
 
-	stmtCtx      *stmtctx.StatementContext
+	stmtCtx *stmtctx.StatementContext
 	//compareFuncs []expression.CompareFunc //
-	joiner       joiner
+	joiner joiner
 	//isOuterJoin  bool //
 	//
 	//prepared bool //
@@ -52,7 +52,10 @@ type MergeJoinExec struct {
 	childrenResults []*chunk.Chunk //
 
 	memTracker *memory.Tracker
-	adaptor Adaptor
+	adaptor    Adaptor
+
+	closeCh            chan struct{}
+	joinChkResourceChs []chan *chunk.Chunk
 }
 
 type mergeJoinOuterTable struct {
@@ -204,6 +207,18 @@ func (e *MergeJoinExec) Close() error {
 	e.childrenResults = nil
 	e.memTracker = nil
 
+	if e.closeCh != nil {
+		close(e.closeCh)
+	}
+
+	if len(e.joinChkResourceChs) > 0{
+		for _, joinChkResourceCh := range e.joinChkResourceChs {
+			close(joinChkResourceCh)
+			for range joinChkResourceCh {
+			}
+		}
+	}
+
 	return e.baseExecutor.Close()
 }
 
@@ -221,7 +236,7 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	}
 	//adapter.InitAdaptor("mergeJoin")
 	//adapter.strategy = adapter.Adapt()
-	adapter.strategy.Init(e)
+	adapter.strategy.Init(ctx, e)
 
 	//psprepared = false
 	//psmemTracker = memory.NewTracker(psid, psctx.GetSessionVars().MemQuotaMergeJoin)
@@ -248,7 +263,7 @@ func compareChunkRow(cmpFuncs []chunk.CompareFunc, lhsRow, rhsRow chunk.Row, lhs
 	return 0
 }
 
-func (os *originMergeJoinStrategy) prepare(ctx context.Context, mergeJoinExec Executor, requiredRows int) error {
+func (os *OriginMergeJoinStrategy) prepare(ctx context.Context, mergeJoinExec Executor, requiredRows int) error {
 	e, ok := mergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("type error")
@@ -303,7 +318,7 @@ func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	return nil
 }
 
-func (os *originMergeJoinStrategy) joinToChunk(ctx context.Context, mergeJoinExec Executor, chk *chunk.Chunk) (hasMore bool, err error) {
+func (os *OriginMergeJoinStrategy) joinToChunk(ctx context.Context, mergeJoinExec Executor, chk *chunk.Chunk) (hasMore bool, err error) {
 	e, ok := mergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("type error")
@@ -370,7 +385,7 @@ func (os *originMergeJoinStrategy) joinToChunk(ctx context.Context, mergeJoinExe
 	}
 }
 
-func (os *originMergeJoinStrategy) compare(mergeJoinExec Executor, outerRow, innerRow chunk.Row) (int, error) {
+func (os *OriginMergeJoinStrategy) compare(mergeJoinExec Executor, outerRow, innerRow chunk.Row) (int, error) {
 	e, ok := mergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("error")
@@ -392,7 +407,7 @@ func (os *originMergeJoinStrategy) compare(mergeJoinExec Executor, outerRow, inn
 
 // fetchNextInnerRows fetches the next join group, within which all the rows
 // have the same join key, from the inner table.
-func (os *originMergeJoinStrategy) fetchNextInnerRows() (err error) {
+func (os *OriginMergeJoinStrategy) fetchNextInnerRows() (err error) {
 	//e, ok := mergeJoinExec.(*MergeJoinExec)
 	//if !ok {
 	//	panic("type error")
@@ -409,7 +424,7 @@ func (os *originMergeJoinStrategy) fetchNextInnerRows() (err error) {
 // fetchNextOuterRows fetches the next Chunk of outer table. Rows in a Chunk
 // may not all belong to the same join key, but are guaranteed to be sorted
 // according to the join key.
-func (os *originMergeJoinStrategy) fetchNextOuterRows(ctx context.Context, mergeJoinExec Executor, requiredRows int) (err error) {
+func (os *OriginMergeJoinStrategy) fetchNextOuterRows(ctx context.Context, mergeJoinExec Executor, requiredRows int) (err error) {
 	e, ok := mergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("error")

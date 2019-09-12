@@ -3,6 +3,7 @@ package executor
 import (
 	"fmt"
 	"github.com/pingcap/tidb/planner/core"
+	"github.com/pingcap/tidb/util/chunk"
 )
 
 //Adaptor is used to acquire strategies dynamically.
@@ -12,16 +13,16 @@ type Adaptor interface {
 }
 
 type baseAdaptor struct {
-	pg ParamGenerator
-	sg SceneGenerator
-	mapper *Mapper
+	pg       ParamGenerator
+	sg       SceneGenerator
+	mapper   *Mapper
 	strategy Strategy
-	rg *Register
+	rg       *Register
 }
 
 //Register is used to provide the init method.
 type Register struct {
-	registry map[string]func()(ParamGenerator, SceneGenerator)
+	registry map[string]func() (ParamGenerator, SceneGenerator)
 }
 
 //define our own adaptor to extend baseAdaptor.
@@ -29,9 +30,9 @@ type MergeJoinAdapter struct {
 	baseAdaptor
 }
 
-func (ba *baseAdaptor) initRegister() *Register{
-    return &Register{
-		registry: make(map[string] func()(ParamGenerator, SceneGenerator)),
+func (ba *baseAdaptor) initRegister() *Register {
+	return &Register{
+		registry: make(map[string]func() (ParamGenerator, SceneGenerator)),
 	}
 }
 
@@ -40,7 +41,7 @@ func (ba *baseAdaptor) addRegister(rg *Register) {
 }
 
 //register the method used for initiating ParamGenerator and SceneGenerator.
-func (rg *Register) Register(name string, initGenerator func()(ParamGenerator, SceneGenerator)) {
+func (rg *Register) Register(name string, initGenerator func() (ParamGenerator, SceneGenerator)) {
 	rg.registry[name] = initGenerator
 }
 
@@ -60,7 +61,7 @@ func (ba *baseAdaptor) InitAdaptor(name string) {
 //2.Generate scene according to data characteristics, cpu information and memory information.
 //3.According to generated scene to match scene in the scene library.
 //4.Use mapper to get startegy what we should use.
-func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor) Strategy{
+func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor) Strategy {
 	fmt.Println("begin to get strategy...")
 
 	hwInfo := ba.pg.GetSystemState()
@@ -87,29 +88,29 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 
 	//innerFilter := v.RightConditions
 
-	if ps, ok := strategy.(*originMergeJoinStrategy); ok {
-        ps.compareFuncs = v.CompareFuncs
-        ps.isOuterJoin = v.JoinType.IsOuterJoin()
-        ps.outerIdx = 0
-        ps.innerTable = &mergeJoinInnerTable{
+	if os, ok := strategy.(*OriginMergeJoinStrategy); ok {
+		os.compareFuncs = v.CompareFuncs
+		os.isOuterJoin = v.JoinType.IsOuterJoin()
+		os.outerIdx = 0
+		os.innerTable = &mergeJoinInnerTable{
 			reader:   rightExec,
 			joinKeys: rightKeys,
 		}
-		ps.outerTable = &mergeJoinOuterTable{
+		os.outerTable = &mergeJoinOuterTable{
 			reader: leftExec,
 			filter: v.LeftConditions,
 			keys:   leftKeys,
 		}
 
 		if v.JoinType == core.RightOuterJoin {
-			ps.outerIdx = 1
-			ps.outerTable.reader = rightExec
-			ps.outerTable.filter = v.RightConditions
-			ps.outerTable.keys = rightKeys
+			os.outerIdx = 1
+			os.outerTable.reader = rightExec
+			os.outerTable.filter = v.RightConditions
+			os.outerTable.keys = rightKeys
 
 			//innerFilter = v.LeftConditions
-			ps.innerTable.reader = leftExec
-			ps.innerTable.joinKeys = leftKeys
+			os.innerTable.reader = leftExec
+			os.innerTable.joinKeys = leftKeys
 		}
 
 		//if len(innerFilter) != 0 {
@@ -118,5 +119,34 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 		//}
 	}
 
+	if ps, ok := strategy.(*ParallelMergeJoinStrategy); ok {
+		ps.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftJoinKeys))
+		for i := range v.LeftJoinKeys {
+			ps.compareFuncs = append(ps.compareFuncs, chunk.GetCompareFunc(v.LeftJoinKeys[i].RetType))
+		}
+		ps.outerIdx = 0
+		//innerFilter := v.RightConditions
+
+		ps.innerTable = &parallelMergeJoinInnerTable{}
+		ps.innerTable.reader = rightExec
+		ps.innerTable.joinKeys = rightKeys
+
+		ps.outerTable = &parallelMergeJoinOuterTable{}
+		ps.outerTable.reader = leftExec
+		ps.outerTable.filter = v.LeftConditions
+		ps.outerTable.joinKeys = v.LeftJoinKeys
+
+		if v.JoinType == core.RightOuterJoin {
+			ps.outerIdx = 1
+			ps.outerTable.reader = rightExec
+			ps.outerTable.filter = v.RightConditions
+			//e.outerTable.keys = rightKeys
+			ps.outerTable.joinKeys = rightKeys
+
+			//innerFilter = v.LeftConditions
+			ps.innerTable.reader = leftExec
+			ps.innerTable.joinKeys = leftKeys
+		}
+	}
 	return strategy
 }

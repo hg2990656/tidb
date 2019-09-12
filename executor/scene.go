@@ -3,11 +3,11 @@ package executor
 import "fmt"
 
 type StatsInfo struct {
-	nullFrac int
-	nDistinct int
-	mostCommonVals []interface{}
+	nullFrac        int
+	nDistinct       int
+	mostCommonVals  []interface{}
 	mostCommonFreqs []float32
-	relTupleNum int64
+	relTupleNum     int64
 
 	//The histogram information of join keys.
 	//...
@@ -16,7 +16,7 @@ type StatsInfo struct {
 type HardWareInfo struct {
 	cpuUsageRate float32
 	memUsageRate float32
-	memCap float32
+	memCap       float32
 
 	//other fields...
 	//...
@@ -28,7 +28,7 @@ type Scene interface {
 }
 
 type baseScene struct {
-	statsInfo *StatsInfo
+	statsInfo    *StatsInfo
 	hardwareInfo *HardWareInfo
 }
 
@@ -39,8 +39,8 @@ type MergeJoinScene struct {
 	sceneName string
 
 	balanceDegree []float32
-	memUsageRate []float32
-	cpuUsageRate []float32
+	memUsageRate  []float32
+	cpuUsageRate  []float32
 }
 
 func (hs *MergeJoinScene) CompareTo(scene Scene) bool {
@@ -52,4 +52,3 @@ func (hs *MergeJoinScene) CompareTo(scene Scene) bool {
 	}
 	return false
 }
-

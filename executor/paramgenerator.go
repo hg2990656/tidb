@@ -9,14 +9,14 @@ type ParamGenerator interface {
 }
 
 //Define our own ParamGenerator HashJoinPG, which implements the interface ParamGenerator.
-type MergeJoinPG struct {}
+type MergeJoinPG struct{}
 
-func (mjPG *MergeJoinPG) GetSystemState() *HardWareInfo{
+func (mjPG *MergeJoinPG) GetSystemState() *HardWareInfo {
 	fmt.Println("get hardware information...")
 	return &HardWareInfo{}
 }
 
-func (mjPG *MergeJoinPG) GetStatistic() *StatsInfo{
+func (mjPG *MergeJoinPG) GetStatistic() *StatsInfo {
 	fmt.Println("get statistics information...")
 	return &StatsInfo{}
 }
