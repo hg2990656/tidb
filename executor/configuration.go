@@ -1,7 +1,8 @@
 package executor
 
 // scene
-var MergeJoinSceneLib []Scene = []Scene{
+var MergeJoinSceneLib = []Scene{
+	mtMJScene,
 	originMJScene,
 	parallelMJScene,
 }
@@ -22,8 +23,17 @@ var parallelMJScene Scene = &MergeJoinScene{
 	cpuUsageRate:  []float32{0.1, 0.6},
 }
 
+var mtMJScene Scene = &MergeJoinScene{
+	sceneName: "mtMJScene",
+
+	balanceDegree: []float32{0.1, 0.2},
+	memUsageRate:  []float32{0.2, 0.3},
+	cpuUsageRate:  []float32{0.1, 0.6},
+}
+
 // strategy
-var MergeJoinStrategyLib []Strategy = []Strategy{
+var MergeJoinStrategyLib = []Strategy{
+	mtMJStrategy,
 	originMJStrategy,
 	parallelMJStrategy,
 }
@@ -40,8 +50,15 @@ var parallelMJStrategy Strategy = &ParallelMergeJoinStrategy{
 	},
 }
 
+var mtMJStrategy Strategy = &MtMergeJoinStrategy{
+	baseStrategy: baseStrategy{
+		strategyName: "mtStrategy",
+	},
+}
+
 //Define mapper relation between scene and strategy.
-var MergeJoinMapper map[Scene][]Strategy = map[Scene][]Strategy{
+var MergeJoinMapper = map[Scene][]Strategy{
 	originMJScene:   {originMJStrategy},
 	parallelMJScene: {parallelMJStrategy},
+	mtMJScene:       {mtMJStrategy},
 }

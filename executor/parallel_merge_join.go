@@ -22,34 +22,6 @@ import (
 	"golang.org/x/net/context"
 )
 
-// MergeJoinExec implements the merge join algorithm.
-// This operator assumes that two iterators of both sides
-// will provide required order on join condition:
-// 1. For equal-join, one of the join key from each side
-// matches the order given.
-// 2. For other cases its preferred not to use SMJ and operator
-// will throw error.
-//type MergeJoinExec struct {
-//	baseExecutor
-//
-//	stmtCtx      *stmtctx.StatementContext
-//	compareFuncs []chunk.CompareFunc
-//	joiner       joiner
-//	isOuterJoin  bool
-//	outerIdx     int
-//
-//	innerTable *mergeJoinInnerTable
-//	outerTable *mergeJoinOuterTable
-//
-//	memTracker *memory.Tracker
-//
-//	curTask     *mergeTask
-//	mergeTaskCh <-chan *mergeTask
-//
-//	closeCh            chan struct{}
-//	joinChkResourceChs []chan *chunk.Chunk
-//}
-
 type mergeJoinTable struct {
 	reader   Executor
 	joinKeys []*expression.Column
@@ -144,48 +116,6 @@ type innerFetchWorker struct {
 	doneCh        <-chan bool
 	closedCh      <-chan bool
 }
-
-// Open implements the Executor Open interface.
-//func (e *MergeJoinExec) Open(ctx context.Context) error {
-//	if err := e.baseExecutor.Open(ctx); err != nil {
-//		return errors.Trace(err)
-//	}
-//
-//	concurrency := e.ctx.GetSessionVars().IndexLookupJoinConcurrency
-//
-//	closeCh := make(chan struct{})
-//	e.closeCh = closeCh
-//
-//	taskCh := make(chan *mergeTask, concurrency)
-//	e.mergeTaskCh = taskCh
-//
-//	joinChkResourceChs := make([]chan *chunk.Chunk, concurrency)
-//	for i := 0; i < concurrency; i++ {
-//		joinChkResourceChs[i] = make(chan *chunk.Chunk, 1)
-//		joinChkResourceChs[i] <- newFirstChunk(e)
-//	}
-//	e.joinChkResourceChs = joinChkResourceChs
-//
-//	//e.memTracker = memory.NewTracker(e.id, e.ctx.GetSessionVars().MemQuotaMergeJoin)
-//	//e.memTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
-//
-//	innerFetchResultCh := make(chan *innerFetchResult, concurrency)
-//	doneCh := make(chan bool, concurrency)
-//	closedCh := make(chan bool, concurrency)
-//	iw := e.newInnerFetchWorker(innerFetchResultCh, doneCh, closedCh)
-//	go iw.run(ctx, concurrency)
-//
-//	mergeJoinWorkerMergeTaskCh := make(chan *mergeTask, concurrency)
-//	for i := 0; i < concurrency; i++ {
-//		mw := e.newMergeJoinWorker(i, innerFetchResultCh, mergeJoinWorkerMergeTaskCh, joinChkResourceChs[i], doneCh, closedCh)
-//		go mw.run(ctx, i)
-//	}
-//
-//	ow := e.newOuterFetchWorker(taskCh, mergeJoinWorkerMergeTaskCh)
-//	go ow.run(ctx)
-//
-//	return nil
-//}
 
 func (ps *ParallelMergeJoinStrategy) newInnerFetchWorker(innerResultCh chan<- *innerFetchResult, doneCh, closedCh chan bool) *innerFetchWorker {
 	return &innerFetchWorker{
@@ -789,46 +719,6 @@ func (t *mergeJoinTable) init(ctx context.Context, chk4Reader *chunk.Chunk) (err
 	return errors.Trace(err)
 }
 
-//func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.Chunk) error {
-//	if e.runtimeStats != nil {
-//		start := time.Now()
-//		defer func() { e.runtimeStats.Record(time.Since(start), req.NumRows()) }()
-//	}
-//	req.Reset()
-//
-//	var err error
-//	for {
-//		if e.curTask == nil {
-//			e.curTask = e.getNextTask(ctx)
-//			if e.curTask == nil {
-//				break
-//			}
-//
-//			if e.curTask.buildErr != nil {
-//				return e.curTask.buildErr
-//			}
-//		}
-//
-//		joinResult, ok := <-e.curTask.joinResultCh
-//		//curTask process complete, we need getNextTask, so set curTask = nil
-//		if !ok {
-//			e.curTask = nil
-//			continue
-//		}
-//
-//		if joinResult.err != nil {
-//			err = errors.Trace(joinResult.err)
-//			break
-//		}
-//
-//		req.SwapColumns(joinResult.chk)
-//		joinResult.src <- joinResult.chk
-//		break
-//	}
-//
-//	return err
-//}
-
 func (ps *ParallelMergeJoinStrategy) getNextTask(ctx context.Context) *mergeTask {
 	select {
 	case task, ok := <-ps.mergeTaskCh:
@@ -873,18 +763,3 @@ func (t *mergeJoinTable) hasNullInJoinKey(row chunk.Row) bool {
 	}
 	return false
 }
-
-// Close implements the Executor Close interface.
-//func (e *MergeJoinExec) Close() error {
-//	//e.memTracker.Detach()
-//	//e.memTracker = nil
-//
-//	close(e.closeCh)
-//
-//	for _, joinChkResourceCh := range e.joinChkResourceChs {
-//		close(joinChkResourceCh)
-//		for range joinChkResourceCh {
-//		}
-//	}
-//	return errors.Trace(e.baseExecutor.Close())
-//}

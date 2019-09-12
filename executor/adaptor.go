@@ -148,5 +148,35 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 			ps.innerTable.joinKeys = leftKeys
 		}
 	}
+
+	if mt, ok := strategy.(*MtMergeJoinStrategy); ok {
+		mt.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftJoinKeys))
+		for i := range v.LeftJoinKeys {
+			mt.compareFuncs = append(mt.compareFuncs, chunk.GetCompareFunc(v.LeftJoinKeys[i].RetType))
+		}
+		mt.outerIdx = 0
+		//innerFilter := v.RightConditions
+
+		mt.innerTable = &mtMergeJoinInnerTable{}
+		mt.innerTable.reader = rightExec
+		mt.innerTable.joinKeys = rightKeys
+
+		mt.outerTable = &mtMergeJoinOuterTable{}
+		mt.outerTable.reader = leftExec
+		mt.outerTable.filter = v.LeftConditions
+		mt.outerTable.joinKeys = v.LeftJoinKeys
+
+		if v.JoinType == core.RightOuterJoin {
+			mt.outerIdx = 1
+			mt.outerTable.reader = rightExec
+			mt.outerTable.filter = v.RightConditions
+			//e.outerTable.keys = rightKeys
+			mt.outerTable.joinKeys = rightKeys
+
+			//innerFilter = v.LeftConditions
+			mt.innerTable.reader = leftExec
+			mt.innerTable.joinKeys = leftKeys
+		}
+	}
 	return strategy
 }

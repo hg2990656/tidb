@@ -234,21 +234,7 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	if !ok {
 		panic("Adaptor type missmatch!")
 	}
-	//adapter.InitAdaptor("mergeJoin")
-	//adapter.strategy = adapter.Adapt()
 	adapter.strategy.Init(ctx, e)
-
-	//psprepared = false
-	//psmemTracker = memory.NewTracker(psid, psctx.GetSessionVars().MemQuotaMergeJoin)
-	//psmemTracker.AttachTo(psctx.GetSessionVars().StmtCtx.MemTracker)
-	//
-	//pschildrenResults = make([]*chunk.Chunk, 0, len(pschildren))
-	//for _, child := range pschildren {
-	//	pschildrenResults = append(pschildrenResults, newFirstChunk(child))
-	//}
-	//
-	//psinnerTable.memTracker = memory.NewTracker(innerTableLabel, -1)
-	//psinnerTable.memTracker.AttachTo(psmemTracker)
 
 	return nil
 }

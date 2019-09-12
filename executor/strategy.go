@@ -2,10 +2,12 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/memory"
+	"github.com/pingcap/tidb/util/stringutil"
 	"time"
 )
 
@@ -52,6 +54,23 @@ type ParallelMergeJoinStrategy struct {
 
 	//closeCh            chan struct{}
 	//joinChkResourceChs []chan *chunk.Chunk
+}
+
+type MtMergeJoinStrategy struct {
+	baseStrategy
+
+	compareFuncs []chunk.CompareFunc
+
+	innerTable *mtMergeJoinInnerTable
+	outerTable *mtMergeJoinOuterTable
+
+	outerIdx     int
+
+	curTask     *mtMergeTask
+	mergeTaskCh <-chan *mtMergeTask
+
+	closeCh            chan struct{}
+	joinChkResourceChs []chan *chunk.Chunk
 }
 
 func (os *OriginMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) {
@@ -162,6 +181,94 @@ func (ps *ParallelMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Exe
 		//curTask process complete, we need getNextTask, so set curTask = nil
 		if !ok {
 			ps.curTask = nil
+			continue
+		}
+
+		if joinResult.err != nil {
+			err = errors.Trace(joinResult.err)
+			break
+		}
+
+		req.SwapColumns(joinResult.chk)
+		joinResult.src <- joinResult.chk
+		break
+	}
+
+	return err
+}
+
+func (mt *MtMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) {
+	e, ok := mergeJoinExec.(*MergeJoinExec)
+	if !ok {
+		panic("type error")
+	}
+
+	concurrency := e.ctx.GetSessionVars().IndexLookupJoinConcurrency
+	closeCh := make(chan struct{})
+	e.closeCh = closeCh
+	taskCh := make(chan *mtMergeTask, concurrency)
+	mt.mergeTaskCh = taskCh
+	joinChkResourceChs := make([]chan *chunk.Chunk, concurrency)
+	for i := 0; i < concurrency; i++ {
+		joinChkResourceChs[i] = make(chan *chunk.Chunk, 1)
+		joinChkResourceChs[i] <- newFirstChunk(e)
+	}
+	e.joinChkResourceChs = joinChkResourceChs
+
+	e.memTracker = memory.NewTracker(e.id, e.ctx.GetSessionVars().MemQuotaMergeJoin)
+	e.memTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
+
+	mt.innerTable.memTracker = memory.NewTracker(stringutil.MemoizeStr(func() string { return fmt.Sprintf("innerTable") }), -1)
+	mt.innerTable.memTracker.AttachTo(e.memTracker)
+	mt.outerTable.memTracker = memory.NewTracker(stringutil.MemoizeStr(func() string { return fmt.Sprintf("outerTable") }), -1)
+	mt.outerTable.memTracker.AttachTo(e.memTracker)
+
+	innerFetchResultCh := make(chan *mtInnerFetchResult)
+	iw := mt.newInnerFetchWorker(innerFetchResultCh)
+	go iw.run(ctx)
+
+	outerFetchResultCh := make(chan *mtOuterFetchResult)
+	ow := mt.newOuterFetchWorker(outerFetchResultCh, e)
+	go ow.run(ctx)
+
+	mergeWorkerMergeTaskCh := make(chan *mtMergeTask, concurrency)
+	for i := 0; i < concurrency; i++ {
+		mw := mt.newMergeWorker(e, i, mergeWorkerMergeTaskCh, joinChkResourceChs[i])
+		go mw.run(ctx)
+	}
+
+	cw := mt.newCompareWorker(e, innerFetchResultCh, outerFetchResultCh, mergeWorkerMergeTaskCh, taskCh, concurrency)
+	go cw.run(ctx)
+}
+
+func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor, req *chunk.Chunk) error{
+	e, ok := mergeJoinExec.(*MergeJoinExec)
+	if !ok {
+		panic("type error")
+	}
+
+	if e.runtimeStats != nil {
+		start := time.Now()
+		defer func() { e.runtimeStats.Record(time.Since(start), req.NumRows()) }()
+	}
+	req.Reset()
+
+	var err error
+	for {
+		if mt.curTask == nil {
+			mt.curTask = mt.getNextTask(ctx)
+			if mt.curTask == nil { //index merge join all complete
+				break
+			}
+
+			if mt.curTask.buildErr != nil {
+				return mt.curTask.buildErr
+			}
+		}
+
+		joinResult, ok := <-mt.curTask.joinResultCh
+		if !ok { //curTask process complete,we need getNextTask,so set curTask = nil
+			mt.curTask = nil
 			continue
 		}
 
