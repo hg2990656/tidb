@@ -100,7 +100,7 @@ type mtMergeTask struct {
 	outerRows     []chunk.Row
 	outerSelected []bool
 	outerFrom     int
-	outerEnd      int //not included
+	outerEnd      int
 }
 
 type mtOuterFetchResult struct {

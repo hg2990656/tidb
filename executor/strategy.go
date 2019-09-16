@@ -11,32 +11,31 @@ import (
 	"time"
 )
 
-//define startegy
 type Strategy interface {
 	Init(ctx context.Context, e Executor)
 	Exec(ctx context.Context, e Executor, req *chunk.Chunk) error
+	GetJoinType() int
 }
 
 type baseStrategy struct {
 	strategyName string
+	joinType int
 }
 
 type OriginMergeJoinStrategy struct {
 	baseStrategy
 
-	compareFuncs []expression.CompareFunc //
-	isOuterJoin  bool                     //
+	compareFuncs []expression.CompareFunc
+	isOuterJoin  bool
 
-	prepared bool //
-	outerIdx int  //
+	prepared bool
+	outerIdx int
 
-	innerTable *mergeJoinInnerTable //
-	outerTable *mergeJoinOuterTable //
+	innerTable *mergeJoinInnerTable
+	outerTable *mergeJoinOuterTable
 
-	innerRows     []chunk.Row    //
-	innerIter4Row chunk.Iterator //
-
-	//childrenResults []*chunk.Chunk //
+	innerRows     []chunk.Row
+	innerIter4Row chunk.Iterator
 }
 
 type ParallelMergeJoinStrategy struct {
@@ -51,26 +50,19 @@ type ParallelMergeJoinStrategy struct {
 
 	curTask     *mergeTask
 	mergeTaskCh <-chan *mergeTask
-
-	//closeCh            chan struct{}
-	//joinChkResourceChs []chan *chunk.Chunk
 }
 
 type MtMergeJoinStrategy struct {
 	baseStrategy
 
 	compareFuncs []chunk.CompareFunc
+	outerIdx     int
 
 	innerTable *mtMergeJoinInnerTable
 	outerTable *mtMergeJoinOuterTable
 
-	outerIdx     int
-
 	curTask     *mtMergeTask
 	mergeTaskCh <-chan *mtMergeTask
-
-	closeCh            chan struct{}
-	joinChkResourceChs []chan *chunk.Chunk
 }
 
 func (os *OriginMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) {
@@ -97,6 +89,7 @@ func (os *OriginMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Execu
 	if !ok {
 		panic("type error")
 	}
+
 	req.Reset()
 	if !os.prepared {
 		if err := os.prepare(ctx, e, req.RequiredRows()); err != nil {
@@ -111,6 +104,10 @@ func (os *OriginMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Execu
 		}
 	}
 	return nil
+}
+
+func (os *OriginMergeJoinStrategy) GetJoinType() int{
+    return os.joinType
 }
 
 func (ps *ParallelMergeJoinStrategy) Init(ctx context.Context, parallelMergeJoinExec Executor) {
@@ -158,6 +155,7 @@ func (ps *ParallelMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Exe
 	if !ok {
 		panic("type error")
 	}
+
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Since(start), req.NumRows()) }()
@@ -178,7 +176,6 @@ func (ps *ParallelMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Exe
 		}
 
 		joinResult, ok := <-ps.curTask.joinResultCh
-		//curTask process complete, we need getNextTask, so set curTask = nil
 		if !ok {
 			ps.curTask = nil
 			continue
@@ -195,6 +192,10 @@ func (ps *ParallelMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Exe
 	}
 
 	return err
+}
+
+func (ps *ParallelMergeJoinStrategy) GetJoinType() int{
+	return ps.joinType
 }
 
 func (mt *MtMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) {
@@ -257,7 +258,7 @@ func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor,
 	for {
 		if mt.curTask == nil {
 			mt.curTask = mt.getNextTask(ctx)
-			if mt.curTask == nil { //index merge join all complete
+			if mt.curTask == nil {
 				break
 			}
 
@@ -267,7 +268,8 @@ func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor,
 		}
 
 		joinResult, ok := <-mt.curTask.joinResultCh
-		if !ok { //curTask process complete,we need getNextTask,so set curTask = nil
+		// curTask process complete,we need getNextTask,so set curTask = nil
+		if !ok {
 			mt.curTask = nil
 			continue
 		}
@@ -284,3 +286,8 @@ func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor,
 
 	return err
 }
+
+func (mt *MtMergeJoinStrategy) GetJoinType() int{
+	return mt.joinType
+}
+

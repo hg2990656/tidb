@@ -41,22 +41,25 @@ var MergeJoinStrategyLib = []Strategy{
 var originMJStrategy Strategy = &OriginMergeJoinStrategy{
 	baseStrategy: baseStrategy{
 		strategyName: "originStrategy",
+		joinType: 1,
 	},
 }
 
 var parallelMJStrategy Strategy = &ParallelMergeJoinStrategy{
 	baseStrategy: baseStrategy{
 		strategyName: "parallelStrategy",
+		joinType: 1,
 	},
 }
 
 var mtMJStrategy Strategy = &MtMergeJoinStrategy{
 	baseStrategy: baseStrategy{
 		strategyName: "mtStrategy",
+		joinType: 1,
 	},
 }
 
-//Define mapper relation between scene and strategy.
+// Define mapper relation between scene and strategy.
 var MergeJoinMapper = map[Scene][]Strategy{
 	originMJScene:   {originMJStrategy},
 	parallelMJScene: {parallelMJStrategy},

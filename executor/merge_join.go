@@ -36,20 +36,9 @@ type MergeJoinExec struct {
 	baseExecutor
 
 	stmtCtx *stmtctx.StatementContext
-	//compareFuncs []expression.CompareFunc //
-	joiner joiner
-	//isOuterJoin  bool //
-	//
-	//prepared bool //
-	//outerIdx int //
-	//
-	//innerTable *mergeJoinInnerTable //
-	//outerTable *mergeJoinOuterTable //
-	//
-	//innerRows     []chunk.Row //
-	//innerIter4Row chunk.Iterator //
-	//
-	childrenResults []*chunk.Chunk //
+	joiner  joiner
+
+	childrenResults []*chunk.Chunk
 
 	memTracker *memory.Tracker
 	adaptor    Adaptor
@@ -211,7 +200,7 @@ func (e *MergeJoinExec) Close() error {
 		close(e.closeCh)
 	}
 
-	if len(e.joinChkResourceChs) > 0{
+	if len(e.joinChkResourceChs) > 0 {
 		for _, joinChkResourceCh := range e.joinChkResourceChs {
 			close(joinChkResourceCh)
 			for range joinChkResourceCh {

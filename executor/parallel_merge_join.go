@@ -65,7 +65,7 @@ type mergeJoinWorker struct {
 
 	innerFetchResultCh <-chan *innerFetchResult
 
-	innerChunk    *chunk.Chunk // like curResult
+	innerChunk    *chunk.Chunk
 	innerIter4Row *chunk.Iterator4Chunk
 	curInnerRow   chunk.Row
 	firstRow4Key  chunk.Row

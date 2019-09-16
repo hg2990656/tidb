@@ -926,7 +926,7 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 		}
 	}
 
-	// adaptor
+	// add adaptor to MergeJoinExec
 	mergeJoinAdaptor := &MergeJoinAdapter{}
 
 	register := mergeJoinAdaptor.initRegister()
@@ -935,7 +935,7 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 		return &MergeJoinPG{}, &MergeJoinSG{}
 	})
 
-	mergeJoinAdaptor.addRegister(register)
+	mergeJoinAdaptor.rg = register
 
 	mergeJoinAdaptor.InitAdaptor("mergeJoin")
 	mergeJoinAdaptor.strategy = mergeJoinAdaptor.Adapt(v, leftExec, rightExec)

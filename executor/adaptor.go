@@ -36,10 +36,6 @@ func (ba *baseAdaptor) initRegister() *Register {
 	}
 }
 
-func (ba *baseAdaptor) addRegister(rg *Register) {
-	ba.rg = rg
-}
-
 //register the method used for initiating ParamGenerator and SceneGenerator.
 func (rg *Register) Register(name string, initGenerator func() (ParamGenerator, SceneGenerator)) {
 	rg.registry[name] = initGenerator
@@ -70,14 +66,24 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 	// analyze hardware information and statistics information to generate scene
 	// different sg(scene generator) has different analysis method
 	scene := ba.sg.GenScene(hwInfo, statsInfo)
-
 	matchedScene, ok := ba.mapper.MatchScene(scene)
 	if !ok {
 		panic("All scenes are matched failed!")
 	}
 
 	strategy := ba.mapper.GetStrategy(matchedScene)
+	joinType := strategy.GetJoinType()
 
+	switch joinType {
+	case 1:
+		ba.buildMergeJoinStrategy(vp, leftExec, rightExec, strategy)
+		break
+	}
+
+	return strategy
+}
+
+func (ba *baseAdaptor) buildMergeJoinStrategy(vp core.PhysicalPlan, leftExec, rightExec Executor, strategy Strategy) {
 	v, ok := vp.(*core.PhysicalMergeJoin)
 	if !ok {
 		panic("type error")
@@ -85,8 +91,6 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 
 	leftKeys := v.LeftJoinKeys
 	rightKeys := v.RightJoinKeys
-
-	//innerFilter := v.RightConditions
 
 	if os, ok := strategy.(*OriginMergeJoinStrategy); ok {
 		os.compareFuncs = v.CompareFuncs
@@ -108,15 +112,9 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 			os.outerTable.filter = v.RightConditions
 			os.outerTable.keys = rightKeys
 
-			//innerFilter = v.LeftConditions
 			os.innerTable.reader = leftExec
 			os.innerTable.joinKeys = leftKeys
 		}
-
-		//if len(innerFilter) != 0 {
-		//	b.err = errors.Annotate(ErrBuildExecutor, "merge join's inner filter should be empty.")
-		//	return nil
-		//}
 	}
 
 	if ps, ok := strategy.(*ParallelMergeJoinStrategy); ok {
@@ -125,7 +123,6 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 			ps.compareFuncs = append(ps.compareFuncs, chunk.GetCompareFunc(v.LeftJoinKeys[i].RetType))
 		}
 		ps.outerIdx = 0
-		//innerFilter := v.RightConditions
 
 		ps.innerTable = &parallelMergeJoinInnerTable{}
 		ps.innerTable.reader = rightExec
@@ -143,7 +140,6 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 			//e.outerTable.keys = rightKeys
 			ps.outerTable.joinKeys = rightKeys
 
-			//innerFilter = v.LeftConditions
 			ps.innerTable.reader = leftExec
 			ps.innerTable.joinKeys = leftKeys
 		}
@@ -155,7 +151,6 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 			mt.compareFuncs = append(mt.compareFuncs, chunk.GetCompareFunc(v.LeftJoinKeys[i].RetType))
 		}
 		mt.outerIdx = 0
-		//innerFilter := v.RightConditions
 
 		mt.innerTable = &mtMergeJoinInnerTable{}
 		mt.innerTable.reader = rightExec
@@ -173,10 +168,8 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 			//e.outerTable.keys = rightKeys
 			mt.outerTable.joinKeys = rightKeys
 
-			//innerFilter = v.LeftConditions
 			mt.innerTable.reader = leftExec
 			mt.innerTable.joinKeys = leftKeys
 		}
 	}
-	return strategy
 }
