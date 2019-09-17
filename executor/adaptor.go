@@ -61,7 +61,7 @@ func (ba *baseAdaptor) Adapt(vp core.PhysicalPlan, leftExec, rightExec Executor)
 	fmt.Println("begin to get strategy...")
 
 	hwInfo := ba.pg.GetSystemState()
-	statsInfo := ba.pg.GetStatistic()
+	statsInfo := ba.pg.GetStatistic(vp)
 
 	// analyze hardware information and statistics information to generate scene
 	// different sg(scene generator) has different analysis method

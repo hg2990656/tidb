@@ -1,11 +1,14 @@
 package executor
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/pingcap/tidb/planner/core"
+)
 
 //define params generator
 type ParamGenerator interface {
 	GetSystemState() *HardWareInfo
-	GetStatistic() *StatsInfo
+	GetStatistic(v core.PhysicalPlan) *StatsInfo
 }
 
 //Define our own ParamGenerator HashJoinPG, which implements the interface ParamGenerator.
@@ -16,7 +19,7 @@ func (mjPG *MergeJoinPG) GetSystemState() *HardWareInfo {
 	return &HardWareInfo{}
 }
 
-func (mjPG *MergeJoinPG) GetStatistic() *StatsInfo {
+func (mjPG *MergeJoinPG) GetStatistic(vp core.PhysicalPlan) *StatsInfo {
 	fmt.Println("get statistics information...")
 	return &StatsInfo{}
 }
