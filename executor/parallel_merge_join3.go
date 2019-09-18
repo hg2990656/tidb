@@ -384,7 +384,7 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 			}
 		case closed, ok = <-iw.closedCh:
 			if closed {
-				alive = alive - 1
+				alive -= 1
 			}
 		}
 

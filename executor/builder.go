@@ -848,7 +848,7 @@ func (b *executorBuilder) buildUnionScanFromReader(reader Executor, v *plannerco
 	return us, nil
 }
 
-// buildMergeJoin builds MergeJoinExec executor. sort merge join
+// buildMergeJoin builds MergeJoinExec executor. parallel sort merge join
 
 func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Executor {
 	leftExec := b.build(v.Children()[0])
