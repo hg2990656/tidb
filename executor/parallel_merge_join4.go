@@ -14,7 +14,6 @@
 package executor
 
 import (
-	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/sessionctx"
@@ -413,13 +412,14 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 			for num, id := range aliveIndex {
 				if id == closedWorkerIndex {
 					deleteIndex = num
+					break
 				}
 			}
 			aliveIndex = append(aliveIndex[:deleteIndex], aliveIndex[deleteIndex+1:]...)
 			alive -= 1
 		}
 
-		if !ok {
+		if !ok || alive == 0 {
 			return
 		}
 
@@ -483,11 +483,11 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 
 		if !ok {
 			jw.closedCh <- i
-			fmt.Println("Number ", i, " goroutine close for:")
+			//fmt.Println("Number ", i, " goroutine close for:")
 			return
 		}
 
-		fmt.Println("goroutine", i, "deals with Merge Task number:", mt.number)
+		//fmt.Println("goroutine", i, "deals with Merge Task number:", mt.number)
 
 		// 3.get the sameKeyGroup inner rows from inner chunk and compare with outer table rows in merge task
 		for {
