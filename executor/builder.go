@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/pingcap/tipb/go-tipb"
 	"math"
 	"sort"
 	"strings"
@@ -48,7 +49,6 @@ import (
 	"github.com/pingcap/tidb/util/ranger"
 	"github.com/pingcap/tidb/util/stringutil"
 	"github.com/pingcap/tidb/util/timeutil"
-	"github.com/pingcap/tipb/go-tipb"
 )
 
 var (
