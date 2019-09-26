@@ -14,6 +14,7 @@
 package executor
 
 import (
+	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/sessionctx"
@@ -107,7 +108,7 @@ type mergeJoinWorker struct {
 	outerJoinKeys []*expression.Column
 	innerJoinKeys []*expression.Column
 
-	doneCh          chan<- bool
+	doneCh          chan<- *chunkRequest
 	closedCh        chan<- int
 	rowsWithSameKey []chunk.Row
 }
@@ -126,6 +127,7 @@ type innerFetchResult struct {
 	err        error
 	fetchChunk *chunk.Chunk
 	memTracker *memory.Tracker
+	chunkId int
 }
 
 type outerFetchWorker struct {
@@ -138,10 +140,28 @@ type outerFetchWorker struct {
 }
 
 type innerFetchWorker struct {
-	innerTable    *mergeJoinInnerTable
-	doneCh        <-chan bool
-	closedCh      <-chan int
+	innerTable     *mergeJoinInnerTable
+	doneCh         <-chan *chunkRequest
+	closedCh       <-chan int
 	innerResultChs []chan *innerFetchResult
+
+	innerChunkCache []*chunk.Chunk
+}
+
+type chunkRequest struct {
+	workerId       int
+	requestChunkId int
+}
+
+type waitWorker struct {
+	workerId int
+	chunkId  int
+}
+
+type workerStatus struct {
+	workerId    int
+	lastChunkId int
+	alive       bool
 }
 
 // Open implements the Executor Open interface.
@@ -173,7 +193,7 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	for j := 0; j < concurrency; j++ {
 		innerFetchResultChs[j] = make(chan *innerFetchResult, 1)
 	}
-	doneCh := make(chan bool, concurrency)
+	doneCh := make(chan *chunkRequest, concurrency)
 	closedCh := make(chan int, concurrency)
 	iw := e.newInnerFetchWorker(innerFetchResultChs, doneCh, closedCh)
 	go iw.run(ctx, concurrency)
@@ -190,12 +210,13 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	return nil
 }
 
-func (e *MergeJoinExec) newInnerFetchWorker(innerResultCh []chan *innerFetchResult, doneCh chan bool, closedCh chan int) *innerFetchWorker {
+func (e *MergeJoinExec) newInnerFetchWorker(innerResultCh []chan *innerFetchResult, doneCh chan *chunkRequest, closedCh chan int) *innerFetchWorker {
 	return &innerFetchWorker{
 		innerResultChs: innerResultCh,
-		innerTable:    e.innerTable,
-		doneCh:        doneCh,
-		closedCh:      closedCh,
+		innerTable:     e.innerTable,
+		doneCh:         doneCh,
+		closedCh:       closedCh,
+		//innerChunkCache: make([]*chunk.Chunk, 2),
 	}
 }
 
@@ -209,7 +230,7 @@ func (e *MergeJoinExec) newOuterFetchWorker(taskCh, mergeJoinWorkerMergeTaskCh c
 	}
 }
 
-func (e *MergeJoinExec) newMergeJoinWorker(workerId int, innerFetchResultCh chan *innerFetchResult, mergeJoinWorkerMergeTaskCh chan *mergeTask, joinChkResourceCh chan *chunk.Chunk, doneCh chan<- bool, closedCh chan<- int) *mergeJoinWorker {
+func (e *MergeJoinExec) newMergeJoinWorker(workerId int, innerFetchResultCh chan *innerFetchResult, mergeJoinWorkerMergeTaskCh chan *mergeTask, joinChkResourceCh chan *chunk.Chunk, doneCh chan<- *chunkRequest, closedCh chan<- int) *mergeJoinWorker {
 	return &mergeJoinWorker{
 		closeCh:            e.closeCh,
 		innerFetchResultCh: innerFetchResultCh,
@@ -349,7 +370,6 @@ func (ow *outerFetchWorker) fetchNextOuterChunk(ctx context.Context) (err error)
 // 2.only all join worker send doneCh to inner worker, inner worker can get and send the next inner chunk to all join worker
 func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 	defer func() {
-		//close(iw.innerResultCh)
 		for _, innerResultCh := range iw.innerResultChs {
 			close(innerResultCh)
 			for range innerResultCh {
@@ -370,69 +390,256 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 	// send the first inner chunk to all join worker
 	fetchResult.fetchChunk = iw.innerTable.curResult
 	fetchResult.err = err
+	fetchResult.chunkId = 0
 	for i := 0; i < concurrency; i++ {
-		//iw.innerResultCh <- fetchResult
 		iw.innerResultChs[i] <- fetchResult
 	}
 
-	var count int
-	var closedWorkerIndex, deleteIndex int
-	var ok, done bool
+	var closedWorkerIndex int
+	//var deleteIndex int
+	var chunkRequest *chunkRequest
+	var ok bool
 	var aliveIndex []int
+	chunkMaxId := 0 // record the last inner chunk's id in innerChunkCache
+	var cal []int
+	var chunkIds []int
+	var waitGroup []*waitWorker
+	var done bool
+	workers := make([]*workerStatus, 4)
 	for j := 0; j < concurrency; j++ {
 		aliveIndex = append(aliveIndex, j)
 	}
+	for x := 0; x < 4; x++ {
+		cal = append(cal, 0)
+	}
+	for k := 0; k < 4; k++ {
+		workers[k] = &workerStatus{
+			workerId: k,
+			alive: true,
+			lastChunkId: 0,
+		}
+	}
+
 	alive := concurrency
 
-	// a new chunk is needed, otherwise the columns in joinWorker's outerRowsWithSameKey will be cleared
-	iw.innerTable.curResult = newFirstChunk(iw.innerTable.reader)
+	for {
+		// a new chunk is needed, otherwise the columns in joinWorker's outerRowsWithSameKey will be cleared
+		iw.innerTable.curResult = newFirstChunk(iw.innerTable.reader)
 
-	err = Next(ctx, iw.innerTable.reader, iw.innerTable.curResult)
-	if err != nil || iw.innerTable.curResult.NumRows() == 0 {
-		return
+		err = Next(ctx, iw.innerTable.reader, iw.innerTable.curResult)
+		if err != nil {
+			return
+		}
+
+		if iw.innerTable.curResult.NumRows() == 0 && len(iw.innerChunkCache) == 0 {
+			return
+		}
+
+		if iw.innerTable.curResult.NumRows() != 0 && len(iw.innerChunkCache) < 4 {
+			iw.innerChunkCache = append(iw.innerChunkCache, iw.innerTable.curResult)
+			chunkMaxId += 1
+			chunkIds = append(chunkIds, chunkMaxId)
+		} else {
+			break
+		}
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			ok = false
-		case done, ok = <-iw.doneCh:
-			if done {
-				count += 1
-			}
-		case closedWorkerIndex, ok = <-iw.closedCh:
-			for num, id := range aliveIndex {
-				if id == closedWorkerIndex {
-					deleteIndex = num
-					break
+		case chunkRequest, ok = <-iw.doneCh:
+			if chunkRequest.requestChunkId <= chunkMaxId {
+				// 情况1：3 号 worker 等待获取第 5 个 chunk，此时 0 号 worker 处理完第一个 chunk 后，需要获取第 2 个 chunk，
+				// 从而触发去除第一个 chunk，获取第 5 个 chunk
+				fetchResult = &innerFetchResult{}
+				var chunkIndex int
+				for index, chunkId := range chunkIds {
+					if chunkId == chunkRequest.requestChunkId {
+						chunkIndex = index
+						break
+					}
+				}
+				fetchResult.fetchChunk = iw.innerChunkCache[chunkIndex]
+				fetchResult.chunkId = chunkRequest.requestChunkId
+				iw.innerResultChs[chunkRequest.workerId] <- fetchResult
+				workers[chunkRequest.workerId].lastChunkId = chunkRequest.requestChunkId
+				if chunkRequest.requestChunkId >= 5 {
+					fmt.Println("wow the ", chunkRequest.requestChunkId, " inner chunk")
+				}
+
+				cal[chunkIndex] += 1
+				flag := true
+				for _, worker := range workers {
+					if worker.alive == true && worker.lastChunkId < chunkRequest.requestChunkId {
+						flag = false
+						break
+					}
+				}
+				// 1. some join worker are dead
+				// 2. all join worker are alive and their lastChunkId >= this request chunkId
+				if flag {
+					iw.innerChunkCache = append(iw.innerChunkCache[:chunkIndex], iw.innerChunkCache[chunkIndex+1:]...)
+					cal = append(cal[:chunkIndex], cal[chunkIndex+1:]...)
+					chunkIds = append(chunkIds[:chunkIndex], chunkIds[chunkIndex+1:]...)
+					if iw.innerTable.curResult.NumRows() != 0 {
+						iw.innerChunkCache = append(iw.innerChunkCache, iw.innerTable.curResult)
+						chunkMaxId += 1
+						chunkIds = append(chunkIds, chunkMaxId)
+						cal = append(cal, 0)
+
+						if len(waitGroup) > 0 {
+							for _, waitedWorker := range waitGroup {
+								if waitedWorker.chunkId == chunkMaxId {
+									fetchResult = &innerFetchResult{}
+									fetchResult.fetchChunk = iw.innerTable.curResult
+									iw.innerResultChs[waitedWorker.workerId] <- fetchResult
+									cal[len(cal)-1] += 1
+								}
+							}
+							waitGroup = waitGroup[:0]
+						}
+
+						// get next inner chunk
+						iw.innerTable.curResult = newFirstChunk(iw.innerTable.reader)
+
+						err = Next(ctx, iw.innerTable.reader, iw.innerTable.curResult)
+						if err != nil {
+							return
+						}
+
+						if iw.innerTable.curResult.NumRows() == 0 && len(iw.innerChunkCache) == 0 {
+							return
+						}
+
+						if iw.innerTable.curResult.NumRows() == 0 {
+							done = true
+						}
+					}
+				}
+
+			} else {
+				// if has next inner chunk
+				if done {
+					fetchResult = &innerFetchResult{}
+					fetchResult.chunkId = chunkRequest.requestChunkId
+					iw.innerResultChs[chunkRequest.workerId] <- fetchResult
+				} else {
+					// 假设有两个 worker 还在工作，分别为 0 号和 3 号，chunkIds 为[1,2,3,4]，0 号正在处理的是 1 号 chunk，而 3 号 worker
+					// 需要获取第 5 个 chunk，所以 3 号 worker 需要等待 0 号 worker 获取 2 号 chunk 或者 0 号直接结束（两种情况）
+					waitWorker := &waitWorker{
+						workerId: chunkRequest.workerId,
+						chunkId:  chunkRequest.requestChunkId,
+					}
+					waitGroup = append(waitGroup, waitWorker)
+
+					flag := true
+					for _, worker := range workers {
+						if worker.alive == true && worker.lastChunkId < chunkIds[0] {
+							flag = false
+							break
+						}
+					}
+
+					if flag {
+						iw.innerChunkCache = append(iw.innerChunkCache[:0], iw.innerChunkCache[1:]...)
+						cal = append(cal[:0], cal[1:]...)
+						chunkIds = append(chunkIds[:0], chunkIds[1:]...)
+
+						if iw.innerTable.curResult.NumRows() != 0 {
+							iw.innerChunkCache = append(iw.innerChunkCache, iw.innerTable.curResult)
+							chunkMaxId += 1
+							chunkIds = append(chunkIds, chunkMaxId)
+							cal = append(cal, 0)
+
+							for _, waitedWorker := range waitGroup {
+								if waitedWorker.chunkId == chunkMaxId {
+									fetchResult = &innerFetchResult{}
+									fetchResult.fetchChunk = iw.innerTable.curResult
+									iw.innerResultChs[waitedWorker.workerId] <- fetchResult
+									cal[len(cal)-1] += 1
+								}
+							}
+							waitGroup = waitGroup[:0]
+
+							// get next inner chunk
+							iw.innerTable.curResult = newFirstChunk(iw.innerTable.reader)
+
+							err = Next(ctx, iw.innerTable.reader, iw.innerTable.curResult)
+							if err != nil {
+								return
+							}
+
+							if iw.innerTable.curResult.NumRows() == 0 && len(iw.innerChunkCache) == 0 {
+								return
+							}
+
+							if iw.innerTable.curResult.NumRows() == 0 {
+								done = true
+							}
+						}
+					}
 				}
 			}
-			aliveIndex = append(aliveIndex[:deleteIndex], aliveIndex[deleteIndex+1:]...)
+		case closedWorkerIndex, ok = <-iw.closedCh:
+			workers[closedWorkerIndex].alive = false
 			alive -= 1
+			chunkMinId := chunkIds[0]
+			// 情况 2：3 号 worker 还在等待第 5 个 chunk，此时 0 号 worker 处理第 1 个 chunk 后直接退出了，那么后面就一直阻塞了，因此
+			// 此时需要判断是否有等待的 worker 且是否能移除 innerCache 中的第一个 chunk，为下一个 chunk 腾出位置
+			if len(waitGroup) > 0 {
+				flag := true
+				for _, worker := range workers {
+					if worker.alive == true && worker.lastChunkId < chunkMinId {
+						flag = false
+						break
+					}
+				}
+				if flag {
+					iw.innerChunkCache = append(iw.innerChunkCache[:0], iw.innerChunkCache[1:]...)
+					cal = append(cal[:0], cal[1:]...)
+					chunkIds = append(chunkIds[:0], chunkIds[1:]...)
+
+					if iw.innerTable.curResult.NumRows() != 0 {
+						iw.innerChunkCache = append(iw.innerChunkCache, iw.innerTable.curResult)
+						chunkMaxId += 1
+						chunkIds = append(chunkIds, chunkMaxId)
+						cal = append(cal, 0)
+
+						for _, waitedWorker := range waitGroup {
+							if waitedWorker.chunkId == chunkMaxId {
+								fetchResult = &innerFetchResult{}
+								fetchResult.fetchChunk = iw.innerTable.curResult
+								iw.innerResultChs[waitedWorker.workerId] <- fetchResult
+								cal[len(cal)-1] += 1
+							}
+						}
+						waitGroup = waitGroup[:0]
+
+						// get next inner chunk
+						iw.innerTable.curResult = newFirstChunk(iw.innerTable.reader)
+
+						err = Next(ctx, iw.innerTable.reader, iw.innerTable.curResult)
+						if err != nil {
+							return
+						}
+
+						if iw.innerTable.curResult.NumRows() == 0 && len(iw.innerChunkCache) == 0 {
+							return
+						}
+
+						if iw.innerTable.curResult.NumRows() == 0 {
+							done = true
+						}
+					}
+				}
+			}
+			fmt.Println(closedWorkerIndex, " closed!")
 		}
 
 		if !ok || alive == 0 {
+			fmt.Println("inner worker closed!")
 			return
-		}
-
-		if count == alive {
-			fetchResult = &innerFetchResult{}
-			fetchResult.fetchChunk = iw.innerTable.curResult
-			fetchResult.err = err
-			for _, index := range aliveIndex {
-				//iw.innerResultCh <- fetchResult
-				iw.innerResultChs[index] <- fetchResult
-			}
-
-			// a new chunk is needed, otherwise the columns in joinWorker's outerRowsWithSameKey will be cleared
-			iw.innerTable.curResult = newFirstChunk(iw.innerTable.reader)
-
-			err = Next(ctx, iw.innerTable.reader, iw.innerTable.curResult)
-			if err != nil || iw.innerTable.curResult.NumRows() == 0 {
-				return
-			}
-
-			count = 0
 		}
 	}
 }
@@ -452,6 +659,7 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 	if !jw.fetchNextInnerChunk(ctx) {
 		return
 	}
+	chunkId := 1
 	rowsWithSameKey, err := jw.innerRowsWithSameKey()
 	if err != nil {
 		return
@@ -475,8 +683,12 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 
 		if !ok {
 			jw.closedCh <- i
-			//fmt.Println("Number ", i, " goroutine close for:")
+			fmt.Println("Number ", i, " goroutine close for:")
 			return
+		}
+
+		if len(mt.outerRows) == 2 {
+			fmt.Println("here is the last task!")
 		}
 
 		//fmt.Println("goroutine", i, "deals with Merge Task number:", mt.number)
@@ -498,11 +710,22 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 				}
 				if len(rowsWithSameKey) == 0 {
 					// (1) send doneCh to inner worker
-					jw.doneCh <- true
+					chunkRequest := &chunkRequest{
+						workerId:       i,
+						requestChunkId: chunkId,
+					}
+					jw.doneCh <- chunkRequest
 					// (2) then get the next inner chunk, if there is no next inner chunk then break to get the next task
+					if chunkId >= 5 {
+						fmt.Println("get the ", chunkId, " inner chunk")
+					}
 					if !jw.fetchNextInnerChunk(ctx) {
 						close(mt.joinResultCh)
 						break
+					}
+					chunkId += 1
+					if chunkId >= 5 {
+						fmt.Println("the ", chunkId, " inner chunk")
 					}
 					rowsWithSameKey, err = jw.innerRowsWithSameKey()
 					if err != nil {
@@ -529,7 +752,11 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 				// note: when jw.curInnerRow == jw.innerIter4Row.End(), jw.firstRow4Key may not be equal to jw.innerIter4Row.End()
 				// if jw.firstRow4Key is the last row in now inner chunk, so there is still last innerRowsWithSameKey which just contain the last row
 				if jw.curInnerRow == jw.innerIter4Row.End() && jw.firstRow4Key == jw.innerIter4Row.End() {
-					jw.doneCh <- true
+					chunkRequest := &chunkRequest{
+						workerId:       i,
+						requestChunkId: chunkId,
+					}
+					jw.doneCh <- chunkRequest
 					if !jw.fetchNextInnerChunk(ctx) {
 						//var innerIter4Row chunk.Iterator
 
@@ -541,6 +768,7 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 							return
 						}
 					} else {
+						chunkId += 1
 						innerIter4Row := chunk.NewIterator4Slice(rowsWithSameKey)
 						innerIter4Row.Begin()
 
@@ -584,7 +812,10 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 func (jw *mergeJoinWorker) fetchNextInnerChunk(ctx context.Context) bool {
 	select {
 	case innerResult, ok := <-jw.innerFetchResultCh:
-		if !ok && innerResult == nil {
+		//if !ok && innerResult == nil {
+		//	return false
+		//}
+		if !ok || innerResult == nil  || innerResult.fetchChunk == nil {
 			return false
 		}
 
