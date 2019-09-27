@@ -14,7 +14,6 @@
 package executor
 
 import (
-	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/sessionctx"
@@ -502,11 +501,11 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int, innerChunk
 					return
 				}
 			}
-			fmt.Println(closedWorkerIndex, " closed!")
+			//fmt.Println(closedWorkerIndex, " closed!")
 		}
 
 		if !ok || aliveNum == 0 {
-			fmt.Println("inner worker closed!")
+			//fmt.Println("inner worker closed!")
 			return
 		}
 	}
@@ -522,8 +521,8 @@ func (iw *innerFetchWorker) checkWaitWorker(ctx context.Context, aliveWorkerInde
 		}
 	}
 	if flag {
-		iw.innerChunkCache = iw.innerChunkCache[1:]
-		chunkIds = chunkIds[1:]
+		iw.innerChunkCache = append(iw.innerChunkCache[:0], iw.innerChunkCache[1:]...)
+		chunkIds = append(chunkIds[:0], chunkIds[1:]...)
 
 		if iw.innerTable.curResult.NumRows() != 0 {
 			iw.innerChunkCache = append(iw.innerChunkCache, iw.innerTable.curResult)
@@ -598,12 +597,12 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 
 		if !ok {
 			jw.closedCh <- i
-			fmt.Println("Number ", i, " goroutine close for:")
+			//fmt.Println("Number ", i, " goroutine close for:")
 			return
 		}
 
 		if len(mt.outerRows) == 2 {
-			fmt.Println("here is the last task!")
+			//fmt.Println("here is the last task!")
 		}
 
 		//fmt.Println("goroutine", i, "deals with Merge Task number:", mt.number)
@@ -675,9 +674,6 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 						return
 					}
 
-					if chunkId >= 9 {
-						fmt.Println("get the ", chunkId, " inner chunk")
-					}
 					if jw.fetchNextInnerChunk(ctx) {
 						chunkId += 1
 						rowsWithSameKey, err = jw.innerRowsWithSameKey()
