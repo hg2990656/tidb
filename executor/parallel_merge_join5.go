@@ -95,7 +95,7 @@ type mergeJoinWorker struct {
 
 	innerFetchResultCh <-chan *innerFetchResult
 
-	innerChunk    *chunk.Chunk // like curResult
+	innerChunk    *chunk.Chunk
 	innerIter4Row *chunk.Iterator4Chunk
 	curInnerRow   chunk.Row
 	firstRow4Key  chunk.Row
@@ -118,8 +118,6 @@ type mergeTask struct {
 
 	outerRows     []chunk.Row
 	outerSelected []bool
-
-	number int
 }
 
 type innerFetchResult struct {
@@ -171,14 +169,30 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 
 	concurrency := e.ctx.GetSessionVars().IndexLookupJoinConcurrency
 	innerChunkCacheNum := 4
-	//concurrency := 10
+	//concurrency := 7
 
 	closeCh := make(chan struct{})
 	e.closeCh = closeCh
 
+	// 1.init the channels between the join worker and the inner worker
+	// each join worker has it's own channel to get the different inner chunk from inner worker
+	innerFetchResultChs := make([]chan *innerFetchResult, concurrency)
+	for j := 0; j < concurrency; j++ {
+		innerFetchResultChs[j] = make(chan *innerFetchResult, 1)
+	}
+	// join worker send chunk request to the doneCh to get the next inner chunk from inner worker
+	doneCh := make(chan *chunkRequest, concurrency)
+	// join worker send it's worker id to the closedCh to tell the inner worker it is closed
+	closedCh := make(chan int, concurrency)
+
+	iw := e.newInnerFetchWorker(innerFetchResultChs, doneCh, closedCh)
+	go iw.run(ctx, concurrency, innerChunkCacheNum)
+
+	// 2.init channel between the join worker, main thread and outer worker
+	// main thread get the merge task in taskCh from outer worker
 	taskCh := make(chan *mergeTask, concurrency)
 	e.mergeTaskCh = taskCh
-
+	// main thread get the join result in joinChkResourceCh from join worker
 	joinChkResourceChs := make([]chan *chunk.Chunk, concurrency)
 	for i := 0; i < concurrency; i++ {
 		joinChkResourceChs[i] = make(chan *chunk.Chunk, 1)
@@ -186,24 +200,14 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	}
 	e.joinChkResourceChs = joinChkResourceChs
 
-	//e.memTracker = memory.NewTracker(e.id, e.ctx.GetSessionVars().MemQuotaMergeJoin)
-	//e.memTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
-
-	innerFetchResultChs := make([]chan *innerFetchResult, concurrency)
-	for j := 0; j < concurrency; j++ {
-		innerFetchResultChs[j] = make(chan *innerFetchResult, 1)
-	}
-	doneCh := make(chan *chunkRequest, concurrency)
-	closedCh := make(chan int, concurrency)
-	iw := e.newInnerFetchWorker(innerFetchResultChs, doneCh, closedCh)
-	go iw.run(ctx, concurrency, innerChunkCacheNum)
-
+	// join worker get the merge task in mergeJoinWorkerMergeTaskCh from outer worker
 	mergeJoinWorkerMergeTaskCh := make(chan *mergeTask, concurrency)
 	for i := 0; i < concurrency; i++ {
 		mw := e.newMergeJoinWorker(i, innerFetchResultChs[i], mergeJoinWorkerMergeTaskCh, joinChkResourceChs[i], doneCh, closedCh)
 		go mw.run(ctx, i)
 	}
 
+	// outer worker send the merge task to taskCh and mergeJoinWorkerMergeTaskCh which are received by main thread and join worker respectively
 	ow := e.newOuterFetchWorker(taskCh, mergeJoinWorkerMergeTaskCh)
 	go ow.run(ctx)
 
@@ -260,8 +264,6 @@ func (ow *outerFetchWorker) run(ctx context.Context) {
 		return
 	}
 
-	count := 0
-
 	for {
 		if ow.outerTable.curRow == ow.outerTable.curIter.End() && ow.outerTable.firstRow4Key == ow.outerTable.curIter.End() {
 			err := ow.fetchNextOuterChunk(ctx)
@@ -275,9 +277,7 @@ func (ow *outerFetchWorker) run(ctx context.Context) {
 		if err != nil {
 			break
 		}
-		count++
 		mt.outerRows = outerRows
-		mt.number = count
 
 		// joinResultCh is the channel between the join worker and main thread
 		// join worker get the merge task and send the join result to task's joinResultCh, then main thread get the join result
@@ -399,7 +399,7 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int, innerChunk
 		chunkRequest      *chunkRequest
 		ok                bool
 		aliveWorkerIndex  []int
-		chunkIds          []int // record now chunk id in innerChunkCache
+		chunkIds          []int // record now chunk ids in innerChunkCache
 		waitGroup         []*waitWorker
 		done              bool // whether there is more inner chunk
 	)
@@ -485,6 +485,8 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int, innerChunk
 			}
 		case closedWorkerIndex, ok = <-iw.closedCh:
 			workers[closedWorkerIndex].alive = false
+			aliveNum -= 1
+
 			var deleteIndex int
 			for num, id := range aliveWorkerIndex {
 				if id == closedWorkerIndex {
@@ -493,7 +495,7 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int, innerChunk
 				}
 			}
 			aliveWorkerIndex = append(aliveWorkerIndex[:deleteIndex], aliveWorkerIndex[deleteIndex+1:]...)
-			aliveNum -= 1
+
 			// 情况 2：3 号 worker 还在等待第 5 个 chunk，此时 0 号 worker 处理第 1 个 chunk 后直接退出了，那么后面就一直阻塞了，因此
 			// 此时需要判断是否有等待的 worker 且是否能移除 innerCache 中的第一个 chunk，为下一个 chunk 腾出位置
 			if len(waitGroup) > 0 {
@@ -501,11 +503,9 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int, innerChunk
 					return
 				}
 			}
-			//fmt.Println(closedWorkerIndex, " closed!")
 		}
 
 		if !ok || aliveNum == 0 {
-			//fmt.Println("inner worker closed!")
 			return
 		}
 	}
@@ -521,7 +521,7 @@ func (iw *innerFetchWorker) checkWaitWorker(ctx context.Context, aliveWorkerInde
 		}
 	}
 	if flag {
-		iw.innerChunkCache = append(iw.innerChunkCache[:0], iw.innerChunkCache[1:]...)
+		iw.innerChunkCache = iw.innerChunkCache[1:]
 		chunkIds = append(chunkIds[:0], chunkIds[1:]...)
 
 		if iw.innerTable.curResult.NumRows() != 0 {
@@ -573,39 +573,28 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 	if !jw.fetchNextInnerChunk(ctx) {
 		return
 	}
-	chunkId := 1
 	rowsWithSameKey, err := jw.innerRowsWithSameKey()
 	if err != nil {
 		return
 	}
 
 	// 2.get merge task from outerFetchWorker
-	//var s int
 	var mt *mergeTask
+	chunkId := 1
 
 	for {
 		select {
 		case <-ctx.Done():
 			ok = false
-			//s = 1
 		case <-jw.closeCh:
 			ok = false
-			//s = 2
 		case mt, ok = <-jw.mergeTaskCh:
-			//s = 3
 		}
 
 		if !ok {
 			jw.closedCh <- i
-			//fmt.Println("Number ", i, " goroutine close for:")
 			return
 		}
-
-		if len(mt.outerRows) == 2 {
-			//fmt.Println("here is the last task!")
-		}
-
-		//fmt.Println("goroutine", i, "deals with Merge Task number:", mt.number)
 
 		// 3.get the sameKeyGroup inner rows from inner chunk and compare with outer table rows in merge task
 		for {
@@ -683,9 +672,7 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 						continue
 					}
 				} else {
-					var innerIter4Row chunk.Iterator
-
-					innerIter4Row = chunk.NewIterator4Slice(rowsWithSameKey)
+					innerIter4Row := chunk.NewIterator4Slice(rowsWithSameKey)
 					innerIter4Row.Begin()
 
 					ok = jw.tryToJoin(ctx, mt, innerIter4Row, joinResult)
@@ -711,9 +698,6 @@ func (jw *mergeJoinWorker) run(ctx context.Context, i int) {
 func (jw *mergeJoinWorker) fetchNextInnerChunk(ctx context.Context) bool {
 	select {
 	case innerResult, ok := <-jw.innerFetchResultCh:
-		//if !ok && innerResult == nil {
-		//	return false
-		//}
 		if !ok || innerResult == nil || innerResult.fetchChunk == nil {
 			return false
 		}
@@ -926,9 +910,6 @@ func (t *mergeJoinTable) hasNullInJoinKey(row chunk.Row) bool {
 
 // Close implements the Executor Close interface.
 func (e *MergeJoinExec) Close() error {
-	//e.memTracker.Detach()
-	//e.memTracker = nil
-
 	close(e.closeCh)
 
 	for _, joinChkResourceCh := range e.joinChkResourceChs {
