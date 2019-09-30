@@ -150,7 +150,20 @@ func (mjPG *MergeJoinPG) GetStatistic() (*StatsInfo, error) {
 		relTupleNums:     0,
 	}
 	if session, ok := mjPG.ctx.(sqlexec.SQLExecutor); ok {
-		rightChild := mjPG.rightExec.base().children[0]
+		var rightChild Executor
+		if _, ok := mjPG.rightExec.(*IndexLookUpExecutor); ok {
+            rightChild = mjPG.rightExec
+		} else {
+			if len(mjPG.rightExec.base().children) > 0 {
+				rightChild = searchChildExecutor(mjPG.rightExec)
+				if rightChild == nil {
+					return stats, nil
+				}
+			} else {
+				return stats, nil
+			}
+		}
+
 		if innerTbl, ok := rightChild.(*IndexLookUpExecutor); ok {
 			innerTblInfo := innerTbl.GetTable().Meta()
 			innerTblPhyId := innerTblInfo.ID
@@ -237,4 +250,25 @@ func execQuerySQL(ctx context.Context, exec sqlexec.SQLExecutor, sql string) ([]
 		chkList = append(chkList, req)
 	}
 	return chkList, nil
+}
+
+func searchChildExecutor(e Executor) Executor {
+	if len(e.base().children) > 0 {
+		for _, child := range e.base().children {
+			if childExecutor, ok := child.(*IndexLookUpExecutor); ok {
+				return childExecutor
+			} else {
+				childExecutor :=  searchChildExecutor(child)
+				if childExecutor != nil {
+					return childExecutor
+				}
+			}
+		}
+	} else {
+        if _, ok := e.(*IndexLookUpExecutor); ok {
+            return e
+		}
+	}
+
+	return nil
 }
