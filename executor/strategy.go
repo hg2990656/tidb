@@ -113,6 +113,7 @@ func (ps *ParallelMergeJoinStrategy) Init(ctx context.Context, parallelMergeJoin
 	}
 
 	concurrency := e.ctx.GetSessionVars().IndexLookupJoinConcurrency
+	//concurrency := 10
 
 	closeCh := make(chan struct{})
 	e.closeCh = closeCh
@@ -130,15 +131,18 @@ func (ps *ParallelMergeJoinStrategy) Init(ctx context.Context, parallelMergeJoin
 	//e.memTracker = memory.NewTracker(e.id, e.ctx.GetSessionVars().MemQuotaMergeJoin)
 	//e.memTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
 
-	innerFetchResultCh := make(chan *innerFetchResult, concurrency)
+	innerFetchResultChs := make([]chan *innerFetchResult, concurrency)
+	for j := 0; j < concurrency; j++ {
+		innerFetchResultChs[j] = make(chan *innerFetchResult, 1)
+	}
 	doneCh := make(chan bool, concurrency)
-	closedCh := make(chan bool, concurrency)
-	iw := ps.newInnerFetchWorker(innerFetchResultCh, doneCh, closedCh)
+	closedCh := make(chan int, concurrency)
+	iw := ps.newInnerFetchWorker(innerFetchResultChs, doneCh, closedCh)
 	go iw.run(ctx, concurrency)
 
 	mergeJoinWorkerMergeTaskCh := make(chan *mergeTask, concurrency)
 	for i := 0; i < concurrency; i++ {
-		mw := ps.newMergeJoinWorker(i, innerFetchResultCh, mergeJoinWorkerMergeTaskCh, joinChkResourceChs[i], doneCh, closedCh, e)
+		mw := ps.newMergeJoinWorker(i, innerFetchResultChs[i], mergeJoinWorkerMergeTaskCh, joinChkResourceChs[i], doneCh, closedCh, e)
 		go mw.run(ctx, i)
 	}
 

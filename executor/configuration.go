@@ -12,7 +12,7 @@ var originMJScene Scene = &MergeJoinScene{
 
 	numRows: []int64{0, 100000},
 	nDVs: []int64{0, 100000},
-	memUsageRate:  []float64{0.4, 0.9},
+	memUsageRate:  []float64{0, 0.9},
 	cpuUsageRate:  []float64{0, 1},
 }
 
