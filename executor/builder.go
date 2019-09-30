@@ -928,22 +928,18 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 
 	// add adaptor to MergeJoinExec
 	mergeJoinAdaptor := &MergeJoinAdapter{}
+	register := NewRegister()
+	mergeJoinAdaptor.BindingToAdaptor(register)
 
-	register := mergeJoinAdaptor.initRegister()
 	register.Register("mergeJoin", func() (ParamGenerator, SceneGenerator) {
 		fmt.Println("init merge join ParamGenerator and merge join SceneGenerator...")
 		return &MergeJoinPG{}, &MergeJoinSG{}
 	})
 
-	mergeJoinAdaptor.rg = register
-
-	mergeJoinAdaptor.InitAdaptor("mergeJoin")
-	mergeJoinAdaptor.strategy = mergeJoinAdaptor.Adapt(v, leftExec, rightExec)
-
 	e := &MergeJoinExec{
 		stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
-		//compareFuncs: v.CompareFuncs,
+		compareFuncs: v.CompareFuncs,
 		joiner: newJoiner(
 			b.ctx,
 			v.JoinType,
@@ -953,8 +949,15 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 			retTypes(leftExec),
 			retTypes(rightExec),
 		),
-		//isOuterJoin: v.JoinType.IsOuterJoin(),
-		adaptor: mergeJoinAdaptor,
+		isOuterJoin:     v.JoinType.IsOuterJoin(),
+		adaptor:         mergeJoinAdaptor,
+		rightExec:       rightExec,
+		leftExec:        leftExec,
+		leftKeys:        v.LeftJoinKeys,
+		rightKeys:       v.RightJoinKeys,
+		leftConditions:  v.LeftConditions,
+		rightConditions: v.RightConditions,
+		joinType: v.JoinType,
 	}
 
 	//leftKeys := v.LeftJoinKeys

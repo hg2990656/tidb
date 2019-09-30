@@ -12,14 +12,12 @@ import (
 )
 
 type Strategy interface {
-	Init(ctx context.Context, e Executor)
+	Init(ctx context.Context, e Executor) error
 	Exec(ctx context.Context, e Executor, req *chunk.Chunk) error
-	GetJoinType() int
 }
 
 type baseStrategy struct {
 	strategyName string
-	joinType int
 }
 
 type OriginMergeJoinStrategy struct {
@@ -65,7 +63,7 @@ type MtMergeJoinStrategy struct {
 	mergeTaskCh <-chan *mtMergeTask
 }
 
-func (os *OriginMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) {
+func (os *OriginMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) error {
 	e, ok := mergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("type error")
@@ -82,6 +80,8 @@ func (os *OriginMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Execu
 
 	os.innerTable.memTracker = memory.NewTracker(innerTableLabel, -1)
 	os.innerTable.memTracker.AttachTo(e.memTracker)
+
+	return nil
 }
 
 func (os *OriginMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor, req *chunk.Chunk) error {
@@ -106,11 +106,7 @@ func (os *OriginMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Execu
 	return nil
 }
 
-func (os *OriginMergeJoinStrategy) GetJoinType() int{
-    return os.joinType
-}
-
-func (ps *ParallelMergeJoinStrategy) Init(ctx context.Context, parallelMergeJoinExec Executor) {
+func (ps *ParallelMergeJoinStrategy) Init(ctx context.Context, parallelMergeJoinExec Executor) error {
 	e, ok := parallelMergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("type error")
@@ -148,6 +144,8 @@ func (ps *ParallelMergeJoinStrategy) Init(ctx context.Context, parallelMergeJoin
 
 	ow := ps.newOuterFetchWorker(taskCh, mergeJoinWorkerMergeTaskCh, e)
 	go ow.run(ctx)
+
+	return nil
 }
 
 func (ps *ParallelMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor, req *chunk.Chunk) error {
@@ -194,11 +192,7 @@ func (ps *ParallelMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Exe
 	return err
 }
 
-func (ps *ParallelMergeJoinStrategy) GetJoinType() int{
-	return ps.joinType
-}
-
-func (mt *MtMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) {
+func (mt *MtMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor) error {
 	e, ok := mergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("type error")
@@ -240,9 +234,11 @@ func (mt *MtMergeJoinStrategy) Init(ctx context.Context, mergeJoinExec Executor)
 
 	cw := mt.newCompareWorker(e, innerFetchResultCh, outerFetchResultCh, mergeWorkerMergeTaskCh, taskCh, concurrency)
 	go cw.run(ctx)
+
+	return nil
 }
 
-func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor, req *chunk.Chunk) error{
+func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor, req *chunk.Chunk) error {
 	e, ok := mergeJoinExec.(*MergeJoinExec)
 	if !ok {
 		panic("type error")
@@ -286,8 +282,3 @@ func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor,
 
 	return err
 }
-
-func (mt *MtMergeJoinStrategy) GetJoinType() int{
-	return mt.joinType
-}
-

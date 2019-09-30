@@ -24,7 +24,7 @@ type HardWareInfo struct {
 
 //define scene
 type Scene interface {
-	CompareTo(scene Scene) bool
+	CompareTo(scene Scene) (bool, error)
 }
 
 type baseScene struct {
@@ -43,12 +43,12 @@ type MergeJoinScene struct {
 	cpuUsageRate  []float32
 }
 
-func (hs *MergeJoinScene) CompareTo(scene Scene) bool {
+func (hs *MergeJoinScene) CompareTo(scene Scene) (bool, error) {
 	fmt.Println("compare our own scene with scene lib...")
 	tempHS, ok := scene.(*MergeJoinScene)
 	if ok {
 		fmt.Println(tempHS)
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }

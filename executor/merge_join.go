@@ -16,6 +16,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/tidb/planner/core"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/expression"
@@ -45,6 +46,16 @@ type MergeJoinExec struct {
 
 	closeCh            chan struct{}
 	joinChkResourceChs []chan *chunk.Chunk
+
+	leftExec  Executor
+	rightExec Executor
+	compareFuncs []expression.CompareFunc
+	isOuterJoin bool
+	leftKeys []*expression.Column
+	rightKeys []*expression.Column
+	leftConditions expression.CNFExprs
+	rightConditions expression.CNFExprs
+	joinType core.JoinType
 }
 
 type mergeJoinOuterTable struct {
@@ -221,9 +232,31 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 
 	adapter, ok := e.adaptor.(*MergeJoinAdapter)
 	if !ok {
-		panic("Adaptor type missmatch!")
+		panic("Adaptor type miss match!")
 	}
-	adapter.strategy.Init(ctx, e)
+	adapter.InitAdaptor("mergeJoin")
+	strategy, err := adapter.Adapt()
+	if err != nil {
+		return err
+	}
+
+	switch s := strategy.(type) {
+	case *OriginMergeJoinStrategy:
+		s.buildOriginMergeJoinStrategy(e)
+	case *ParallelMergeJoinStrategy:
+		s.buildParallelMergeJoinStrategy(e)
+	case *MtMergeJoinStrategy:
+		s.buildMtParallelMergeJoinStrategy(e)
+	default:
+		return errors.Trace(errors.New("strategy's type is not matched."))
+	}
+
+	adapter.SetStrategy(strategy)
+
+	err = adapter.GetStrategy().Init(ctx, e)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -269,11 +302,7 @@ func (os *OriginMergeJoinStrategy) prepare(ctx context.Context, mergeJoinExec Ex
 
 // Next implements the Executor Next interface.
 func (e *MergeJoinExec) Next(ctx context.Context, req *chunk.Chunk) error {
-	adaptor, ok := e.adaptor.(*MergeJoinAdapter)
-	if !ok {
-		panic("Adaptor type missmatch!")
-	}
-	err := adaptor.strategy.Exec(ctx, e, req)
+	err := e.adaptor.GetStrategy().Exec(ctx, e, req)
 	if err != nil {
 		return err
 	}
