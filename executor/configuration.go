@@ -10,25 +10,28 @@ var MergeJoinSceneLib = []Scene{
 var originMJScene Scene = &MergeJoinScene{
 	sceneName: "originMJScene",
 
-	balanceDegree: []float32{0.1, 0.2},
-	memUsageRate:  []float32{0.2, 0.3},
-	cpuUsageRate:  []float32{0.1, 0.6},
+	numRows: []int64{0, 100000},
+	nDVs: []int64{0, 100000},
+	memUsageRate:  []float64{0.4, 0.9},
+	cpuUsageRate:  []float64{0, 1},
 }
 
 var parallelMJScene Scene = &MergeJoinScene{
 	sceneName: "parallelMJScene",
 
-	balanceDegree: []float32{0.1, 0.2},
-	memUsageRate:  []float32{0.2, 0.3},
-	cpuUsageRate:  []float32{0.1, 0.6},
+	numRows: []int64{100000, 1000000},
+	nDVs: []int64{0, 1000},
+	memUsageRate:  []float64{0.4, 0.9},
+	cpuUsageRate:  []float64{0, 0.5},
 }
 
 var mtMJScene Scene = &MergeJoinScene{
 	sceneName: "mtMJScene",
 
-	balanceDegree: []float32{0.1, 0.2},
-	memUsageRate:  []float32{0.2, 0.3},
-	cpuUsageRate:  []float32{0.1, 0.6},
+	numRows: []int64{100000, 1000000},
+	nDVs: []int64{1000, 1000000},
+	memUsageRate:  []float64{0, 0.4},
+	cpuUsageRate:  []float64{0, 0.5},
 }
 
 // strategy

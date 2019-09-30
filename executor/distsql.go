@@ -363,6 +363,10 @@ type checkIndexValue struct {
 	genExprs   map[model.TableColumnID]expression.Expression
 }
 
+func (e *IndexLookUpExecutor) GetTable() table.Table {
+	return e.table
+}
+
 // Open implements the Executor Open interface.
 func (e *IndexLookUpExecutor) Open(ctx context.Context) error {
 	var err error

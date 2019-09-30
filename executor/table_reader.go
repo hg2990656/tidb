@@ -81,6 +81,10 @@ type TableReaderExecutor struct {
 	corColInAccess bool
 }
 
+func (e *TableReaderExecutor) GetTable() table.Table {
+	return e.table
+}
+
 // Open initialzes necessary variables for using this executor.
 func (e *TableReaderExecutor) Open(ctx context.Context) error {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {

@@ -1,6 +1,8 @@
 package executor
 
-import "fmt"
+import (
+	"fmt"
+)
 
 //define scene generator
 type SceneGenerator interface {
@@ -8,24 +10,38 @@ type SceneGenerator interface {
 }
 
 //Define our own sceneGenerator HashJoinSG to implements interface SceneGenerator.
-type MergeJoinSG struct{}
+type MergeJoinSG struct {
+
+}
 
 func (mjSG *MergeJoinSG) GenScene(hwInfo *HardWareInfo, statsInfo *StatsInfo) Scene {
 	fmt.Println("analyze hardware information and statistic information and generate our own scene...")
 	// analyze the balance of data. calculate variance of mcvFreqs
-	mcvFreqs := statsInfo.mostCommonFreqs
-	variance := getVariance(mcvFreqs)
-	fmt.Println(variance)
+	// statsInfo.NDVs contain all join key columns' distinct value
+	var nDVs []int64
+	for _, num := range statsInfo.NDVs {
+		nDVs = append(nDVs, num)
+	}
 
 	scene := &MergeJoinScene{
 		baseScene:     baseScene{statsInfo, hwInfo},
-		balanceDegree: []float32{variance, variance},
-		cpuUsageRate:  []float32{hwInfo.cpuUsageRate, hwInfo.cpuUsageRate},
-		memUsageRate:  []float32{hwInfo.memUsageRate, hwInfo.memUsageRate},
+		cpuUsageRate:  []float64{hwInfo.cpuUsageRate, hwInfo.cpuUsageRate},
+		memUsageRate:  []float64{hwInfo.memUsageRate, hwInfo.memUsageRate},
+		numRows: []int64{statsInfo.relTupleNums, statsInfo.relTupleNums},
+		nDVs: nDVs,
 	}
 	return scene
 }
 
-func getVariance(mvcFreqs []float32) float32 {
-	return 0
+func getVariance(mcvCount []int64) float64 {
+	var quadraticSum float64
+	var sum float64
+	var count int64
+	for i := range mcvCount {
+		quadraticSum += float64(mcvCount[i] * mcvCount[i])
+		sum += float64(mcvCount[i])
+		count++
+	}
+	result := quadraticSum/float64(count) - (sum*sum)/float64(count*count)
+	return result
 }

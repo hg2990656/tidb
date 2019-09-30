@@ -62,8 +62,14 @@ func (ba *BaseAdaptor) InitAdaptor(name string) {
 func (ba *BaseAdaptor) Adapt() (Strategy, error) {
 	fmt.Println("begin to get strategy...")
 
-	hwInfo := ba.pg.GetSystemState()
-	statsInfo := ba.pg.GetStatistic()
+	hwInfo, err := ba.pg.GetSystemState()
+	if err != nil {
+		return nil, err
+	}
+	statsInfo, err := ba.pg.GetStatistic()
+	if err != nil {
+		return nil, err
+	}
 
 	// analyze hardware information and statistics information to generate scene
 	// different sg(scene generator) has different analysis method

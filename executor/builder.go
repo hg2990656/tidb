@@ -933,7 +933,13 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 
 	register.Register("mergeJoin", func() (ParamGenerator, SceneGenerator) {
 		fmt.Println("init merge join ParamGenerator and merge join SceneGenerator...")
-		return &MergeJoinPG{}, &MergeJoinSG{}
+		return &MergeJoinPG{
+           ctx: leftExec.base().ctx,
+           leftExec: leftExec,
+           rightExec: rightExec,
+           leftKeys: v.LeftJoinKeys,
+           rightKeys: v.RightJoinKeys,
+		}, &MergeJoinSG{}
 	})
 
 	e := &MergeJoinExec{
