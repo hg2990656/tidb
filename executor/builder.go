@@ -932,7 +932,7 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 	mergeJoinAdaptor.BindingToAdaptor(register)
 
 	register.Register("mergeJoin", func() (ParamGenerator, SceneGenerator) {
-		fmt.Println("init merge join ParamGenerator and merge join SceneGenerator...")
+		//fmt.Println("init merge join ParamGenerator and merge join SceneGenerator...")
 		return &MergeJoinPG{
            ctx: leftExec.base().ctx,
            leftExec: leftExec,

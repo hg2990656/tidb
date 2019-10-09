@@ -15,7 +15,6 @@ package executor
 
 import (
 	"context"
-	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/sessionctx"
@@ -229,9 +228,6 @@ func (ow *mtMergeJoinOuterFetchWorker) run(ctx context.Context) { //row with the
 		ow.outerFetchResultCh <- fetchResult
 		return
 	}
-
-	endRow := ow.outerTable.curIter.End()
-	fmt.Println(endRow)
 
 	for {
 		fetchResult.fetchRow, fetchResult.err = ow.outerTable.rowsWithSameKey()

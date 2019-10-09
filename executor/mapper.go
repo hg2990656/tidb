@@ -1,7 +1,5 @@
 package executor
 
-import "fmt"
-
 //define mapper to map scene to strategies
 type Mapper struct {
 	SceneLib    []Scene
@@ -13,14 +11,14 @@ type Mapper struct {
 //1.load scene library and strategy library from configuration file.
 //2.load mapper realation between scene and startegy from configuration file.
 func (mapper *Mapper) InitMapper() {
-	fmt.Println("init mapper...")
+	//fmt.Println("init mapper...")
 	mapper.SceneLib = MergeJoinSceneLib
 	mapper.StrategyLib = MergeJoinStrategyLib
 	mapper.RelMapper = MergeJoinMapper
 }
 
 func (mapper *Mapper) MatchScene(scene Scene) (Scene, error) {
-	fmt.Println("scene matching...")
+	//fmt.Println("scene matching...")
 	for _, sc := range mapper.SceneLib {
 		ok, err := sc.CompareTo(scene)
 		if err != nil {

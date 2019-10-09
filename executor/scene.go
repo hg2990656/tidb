@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/types"
 )
@@ -50,7 +49,7 @@ type MergeJoinScene struct {
 }
 
 func (ms *MergeJoinScene) CompareTo(scene Scene) (bool, error) {
-	fmt.Println("compare our own scene with scene lib...")
+	//fmt.Println("compare our own scene with scene lib...")
 	mjScene, ok := scene.(*MergeJoinScene)
 	if !ok {
 		return false, errors.Trace(errors.New("Scene's type is not matched."))

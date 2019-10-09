@@ -265,7 +265,7 @@ func (ow *outerFetchWorker) fetchNextOuterChunk(ctx context.Context) (err error)
 	if err != nil {
 		return err
 	}
-	//ow.outerTable.curRow = ow.outerTable.curIter.Begin()
+
 	ow.outerTable.firstRow4Key = ow.outerTable.curIter.Begin()
 	ow.outerTable.curRow = ow.outerTable.curIter.Next()
 	return nil
@@ -296,7 +296,6 @@ func (iw *innerFetchWorker) run(ctx context.Context, concurrency int) {
 	fetchResult.fetchChunk = iw.innerTable.curResult
 	fetchResult.err = err
 	for i := 0; i < concurrency; i++ {
-		//iw.innerResultCh <- fetchResult
 		iw.innerResultChs[i] <- fetchResult
 	}
 

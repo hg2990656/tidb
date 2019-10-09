@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"fmt"
 	"github.com/pingcap/tidb/planner/core"
 	"github.com/pingcap/tidb/util/chunk"
 )
@@ -60,8 +59,6 @@ func (ba *BaseAdaptor) InitAdaptor(name string) {
 //3.According to generated scene to match scene in the scene library.
 //4.Use mapper to get startegy what we should use.
 func (ba *BaseAdaptor) Adapt() (Strategy, error) {
-	fmt.Println("begin to get strategy...")
-
 	hwInfo, err := ba.pg.GetSystemState()
 	if err != nil {
 		return nil, err

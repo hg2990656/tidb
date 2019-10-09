@@ -2,8 +2,8 @@ package executor
 
 // scene
 var MergeJoinSceneLib = []Scene{
-	parallelMJScene,
 	originMJScene,
+	parallelMJScene,
 	mtMJScene,
 }
 

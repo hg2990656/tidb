@@ -16,10 +16,9 @@ package executor
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/tidb/planner/core"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/expression"
+	"github.com/pingcap/tidb/planner/core"
 	"github.com/pingcap/tidb/sessionctx/stmtctx"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/memory"
@@ -229,7 +228,6 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	if err := e.baseExecutor.Open(ctx); err != nil {
 		return err
 	}
-
 	adapter, ok := e.adaptor.(*MergeJoinAdapter)
 	if !ok {
 		panic("Adaptor type miss match!")
@@ -242,10 +240,13 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 
 	switch s := strategy.(type) {
 	case *OriginMergeJoinStrategy:
+		fmt.Println("Origin merge join")
 		s.buildOriginMergeJoinStrategy(e)
 	case *ParallelMergeJoinStrategy:
+		fmt.Println("Parallel merge join")
 		s.buildParallelMergeJoinStrategy(e)
 	case *MtMergeJoinStrategy:
+		fmt.Println("Mt parallel merge join")
 		s.buildMtParallelMergeJoinStrategy(e)
 	default:
 		return errors.Trace(errors.New("strategy's type is not matched."))
@@ -257,7 +258,6 @@ func (e *MergeJoinExec) Open(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 

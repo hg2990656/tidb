@@ -33,7 +33,7 @@ type MergeJoinPG struct {
 }
 
 func (mjPG *MergeJoinPG) GetSystemState() (*HardWareInfo, error) {
-	fmt.Println("get hardware information...")
+	//fmt.Println("get hardware information...")
 	processid := os.Getpid()
 	cpuUsage, memUsage, err := getCpuAndMemUsageRate(processid)
 	if err != nil {

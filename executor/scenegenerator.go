@@ -1,9 +1,5 @@
 package executor
 
-import (
-	"fmt"
-)
-
 //define scene generator
 type SceneGenerator interface {
 	GenScene(hwInfo *HardWareInfo, statsInfo *StatsInfo) Scene
@@ -15,7 +11,7 @@ type MergeJoinSG struct {
 }
 
 func (mjSG *MergeJoinSG) GenScene(hwInfo *HardWareInfo, statsInfo *StatsInfo) Scene {
-	fmt.Println("analyze hardware information and statistic information and generate our own scene...")
+	//fmt.Println("analyze hardware information and statistic information and generate our own scene...")
 	// analyze the balance of data. calculate variance of mcvFreqs
 	// statsInfo.NDVs contain all join key columns' distinct value
 	var nDVs []int64
