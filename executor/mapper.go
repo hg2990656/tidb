@@ -1,3 +1,4 @@
+// add caojun [mapper.go] 20191010:b
 package executor
 
 //define mapper to map scene to strategies
@@ -34,3 +35,4 @@ func (mapper *Mapper) MatchScene(scene Scene) (Scene, error) {
 func (mapper *Mapper) GetStrategy(matchedScene Scene) Strategy {
 	return mapper.RelMapper[matchedScene][0]
 }
+// add 20191010:e

@@ -1,3 +1,4 @@
+// add caojun [scene.go] 20191010:b
 package executor
 
 import (
@@ -72,3 +73,4 @@ func (ms *MergeJoinScene) CompareTo(scene Scene) (bool, error) {
 
 	return false, nil
 }
+// add 20191010:e

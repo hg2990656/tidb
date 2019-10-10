@@ -1,3 +1,4 @@
+// add caojun [paramgenerator.go] 20191010:b
 package executor
 
 import (
@@ -272,3 +273,4 @@ func searchChildExecutor(e Executor) Executor {
 
 	return nil
 }
+// add 20191010:e

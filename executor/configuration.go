@@ -1,3 +1,4 @@
+// add caojun [configuration.go] 20191010:b
 package executor
 
 // scene
@@ -65,3 +66,4 @@ var MergeJoinMapper = map[Scene][]Strategy{
 	parallelMJScene: {parallelMJStrategy},
 	mtMJScene:       {mtMJStrategy},
 }
+// add 20191010:e

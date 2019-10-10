@@ -363,9 +363,11 @@ type checkIndexValue struct {
 	genExprs   map[model.TableColumnID]expression.Expression
 }
 
+// add caojun [GetTable] 20191010:b
 func (e *IndexLookUpExecutor) GetTable() table.Table {
 	return e.table
 }
+// add 20191010:e
 
 // Open implements the Executor Open interface.
 func (e *IndexLookUpExecutor) Open(ctx context.Context) error {

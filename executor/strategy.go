@@ -1,3 +1,4 @@
+// add caojun [strategy.go] 20191010:b
 package executor
 
 import (
@@ -286,3 +287,4 @@ func (mt *MtMergeJoinStrategy) Exec(ctx context.Context, mergeJoinExec Executor,
 
 	return err
 }
+// add 20191010:e

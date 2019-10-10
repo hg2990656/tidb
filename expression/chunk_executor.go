@@ -369,6 +369,7 @@ func VectorizedFilter(ctx sessionctx.Context, filters []Expression, iterator *ch
 	return selected, nil
 }
 
+// add caojun [VectorizedFilterByRow] 20191010:b
 func VectorizedFilterByRow(ctx sessionctx.Context, filters []Expression, rows []chunk.Row, selected []bool) ([]bool, error) {
 	selected = selected[:0]
 	for i, numRows := 0, len(rows); i < numRows; i++ {
@@ -402,3 +403,4 @@ func VectorizedFilterByRow(ctx sessionctx.Context, filters []Expression, rows []
 	}
 	return selected, nil
 }
+// add 20191010:e

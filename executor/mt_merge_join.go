@@ -10,7 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+// add caojun [mt_merge_join.go] 20191010:b
 package executor
 
 import (
@@ -578,3 +578,4 @@ func (mt *MtMergeJoinStrategy) getNextTask(ctx context.Context) *mtMergeTask {
 
 	return nil
 }
+// add 20191010:e

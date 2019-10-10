@@ -1,3 +1,4 @@
+// add caojun [scenegenerator.go] 20191010:b
 package executor
 
 //define scene generator
@@ -41,3 +42,4 @@ func getVariance(mcvCount []int64) float64 {
 	result := quadraticSum/float64(count) - (sum*sum)/float64(count*count)
 	return result
 }
+// add 20191010:e

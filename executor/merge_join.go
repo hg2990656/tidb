@@ -10,7 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+// add caojun [merge_join.go] 20191010:b
 package executor
 
 import (
@@ -452,3 +452,4 @@ func (os *OriginMergeJoinStrategy) fetchNextOuterRows(ctx context.Context, merge
 	os.outerTable.row = os.outerTable.iter.Begin()
 	return nil
 }
+// add 20191010:e
