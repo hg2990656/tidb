@@ -848,111 +848,8 @@ func (b *executorBuilder) buildUnionScanFromReader(reader Executor, v *plannerco
 	return us, nil
 }
 
-// buildMergeJoin builds MergeJoinExec executor. parallel sort merge join
-
-func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Executor {
-	leftExec := b.build(v.Children()[0])
-	if b.err != nil {
-		return nil
-	}
-
-	rightExec := b.build(v.Children()[1])
-	if b.err != nil {
-		return nil
-	}
-
-	defaultValues := v.DefaultValues
-	if defaultValues == nil {
-		if v.JoinType == plannercore.RightOuterJoin {
-			defaultValues = make([]types.Datum, leftExec.Schema().Len())
-		} else {
-			defaultValues = make([]types.Datum, rightExec.Schema().Len())
-		}
-	}
-
-	// sort merge join exec
-	e := &MergeJoinExec{
-		stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
-		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
-		joiner: newJoiner(b.ctx, v.JoinType, v.JoinType == plannercore.RightOuterJoin,
-			defaultValues, v.OtherConditions,
-			retTypes(leftExec), retTypes(rightExec)),
-	}
-
-	// parallel_merge_join exec
-	//e := &MergeJoinExec{
-	//	stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
-	//	baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
-	//	//compareFuncs: v.CompareFuncs,
-	//	joiner: newJoiner(
-	//		b.ctx,
-	//		v.JoinType,
-	//		v.JoinType == plannercore.RightOuterJoin,
-	//		defaultValues,
-	//		v.OtherConditions,
-	//		retTypes(leftExec),
-	//		retTypes(rightExec),
-	//	),
-	//	//isOuterJoin: v.JoinType.IsOuterJoin(),
-	//	//workerWg:      new(sync.WaitGroup),
-	//}
-
-	e.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftKeys))
-	for i := range v.LeftKeys {
-		e.compareFuncs = append(e.compareFuncs, chunk.GetCompareFunc(v.LeftKeys[i].RetType))
-	}
-
-	leftKeys := v.LeftKeys
-	rightKeys := v.RightKeys
-
-	e.outerIdx = 0
-	innerFilter := v.RightConditions
-
-	//e.innerTable = &mergeJoinInnerTable{
-	//	reader:   rightExec,
-	//	joinKeys: rightKeys,
-	//}
-	//
-	//e.outerTable = &mergeJoinOuterTable{
-	//	reader: leftExec,
-	//	filter: v.LeftConditions,
-	//	keys:   leftKeys,
-	//}
-
-	e.innerTable = &mergeJoinInnerTable{}
-	e.innerTable.reader = rightExec
-	e.innerTable.joinKeys = rightKeys
-
-	e.outerTable = &mergeJoinOuterTable{}
-	e.outerTable.reader = leftExec
-	e.outerTable.filter = v.LeftConditions
-	e.outerTable.joinKeys = v.LeftKeys
-
-	if v.JoinType == plannercore.RightOuterJoin {
-		e.outerIdx = 1
-		e.outerTable.reader = rightExec
-		e.outerTable.filter = v.RightConditions
-		//e.outerTable.keys = rightKeys
-		e.outerTable.joinKeys = rightKeys
-
-		innerFilter = v.LeftConditions
-		e.innerTable.reader = leftExec
-		e.innerTable.joinKeys = leftKeys
-	}
-
-	// optimizer should guarantee that filters on inner table are pushed down
-	// to tikv or extracted to a Selection.
-	if len(innerFilter) != 0 {
-		b.err = errors.Annotate(ErrBuildExecutor, "merge join's inner filter should be empty.")
-		return nil
-	}
-
-	executorCounterMergeJoinExec.Inc()
-	return e
-}
-
-// buildMergeJoin builds MergeJoinExec executor. merge join
-
+// mod caojun [buildMergeJoin] 20191010:b
+// buildMergeJoin builds MergeJoinExec executor. origin merge join
 //func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Executor {
 //	leftExec := b.build(v.Children()[0])
 //	if b.err != nil {
@@ -1028,6 +925,78 @@ func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Execu
 //	executorCounterMergeJoinExec.Inc()
 //	return e
 //}
+
+func (b *executorBuilder) buildMergeJoin(v *plannercore.PhysicalMergeJoin) Executor {
+	leftExec := b.build(v.Children()[0])
+	if b.err != nil {
+		return nil
+	}
+
+	rightExec := b.build(v.Children()[1])
+	if b.err != nil {
+		return nil
+	}
+
+	defaultValues := v.DefaultValues
+	if defaultValues == nil {
+		if v.JoinType == plannercore.RightOuterJoin {
+			defaultValues = make([]types.Datum, leftExec.Schema().Len())
+		} else {
+			defaultValues = make([]types.Datum, rightExec.Schema().Len())
+		}
+	}
+
+	// parallel merge join exec
+	e := &MergeJoinExec{
+		stmtCtx:      b.ctx.GetSessionVars().StmtCtx,
+		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), leftExec, rightExec),
+		joiner: newJoiner(b.ctx, v.JoinType, v.JoinType == plannercore.RightOuterJoin,
+			defaultValues, v.OtherConditions,
+			retTypes(leftExec), retTypes(rightExec)),
+	}
+
+	e.compareFuncs = make([]chunk.CompareFunc, 0, len(v.LeftKeys))
+	for i := range v.LeftKeys {
+		e.compareFuncs = append(e.compareFuncs, chunk.GetCompareFunc(v.LeftKeys[i].RetType))
+	}
+
+	leftKeys := v.LeftKeys
+	rightKeys := v.RightKeys
+
+	e.outerIdx = 0
+	innerFilter := v.RightConditions
+
+	e.innerTable = &mergeJoinInnerTable{}
+	e.innerTable.reader = rightExec
+	e.innerTable.joinKeys = rightKeys
+
+	e.outerTable = &mergeJoinOuterTable{}
+	e.outerTable.reader = leftExec
+	e.outerTable.filter = v.LeftConditions
+	e.outerTable.joinKeys = v.LeftKeys
+
+	if v.JoinType == plannercore.RightOuterJoin {
+		e.outerIdx = 1
+		e.outerTable.reader = rightExec
+		e.outerTable.filter = v.RightConditions
+		e.outerTable.joinKeys = rightKeys
+
+		innerFilter = v.LeftConditions
+		e.innerTable.reader = leftExec
+		e.innerTable.joinKeys = leftKeys
+	}
+
+	// optimizer should guarantee that filters on inner table are pushed down
+	// to tikv or extracted to a Selection.
+	if len(innerFilter) != 0 {
+		b.err = errors.Annotate(ErrBuildExecutor, "merge join's inner filter should be empty.")
+		return nil
+	}
+
+	executorCounterMergeJoinExec.Inc()
+	return e
+}
+// mod 20191010:e
 
 func (b *executorBuilder) buildHashJoin(v *plannercore.PhysicalHashJoin) Executor {
 	leftHashKey := make([]*expression.Column, 0, len(v.EqualConditions))

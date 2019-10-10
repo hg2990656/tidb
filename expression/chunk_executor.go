@@ -263,6 +263,7 @@ func VectorizedFilter(ctx sessionctx.Context, filters []Expression, iterator *ch
 	return selected, nil
 }
 
+// add caojun [VectorizedFilterByRow] 20191010:b
 // VectorizedFilter applies a list of filters to a rowSlice and
 // returns a bool slice, which indicates whether a row is passed the filters.
 // Filters is executed vectorized.
@@ -299,3 +300,4 @@ func VectorizedFilterByRow(ctx sessionctx.Context, filters []Expression, rows []
 	}
 	return selected, nil
 }
+// add 20191010:e
